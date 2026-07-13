@@ -71,6 +71,11 @@ let promoteCount = 0;
 let bumperPlaying = false;
 let bumperTrack = '';
 let bumperVolume = 20;
+let sysCpu = 0;
+let sysRam = 0;
+let sysNet = 0;
+let sysTemp = '';
+let lastCpuTimes = null;
 let wifiSSID = '';
 let wifiPassword = '';
 let lanIP = '127.0.0.1';
@@ -189,6 +194,7 @@ async function refreshState() {
   // Poll connected clients
   await refreshClients();
   await refreshBumper();
+  refreshSysStats();
 }
 
 async function refreshReaperState() {
@@ -233,6 +239,36 @@ async function refreshBumper() {
     });
     req.on('error', () => resolve());
     req.end();
+  });
+}
+
+function refreshSysStats() {
+  const os = require('os');
+  const cpus = os.cpus();
+  let totalIdle = 0, totalTick = 0;
+  for (const cpu of cpus) {
+    for (const type in cpu.times) totalTick += cpu.times[type];
+    totalIdle += cpu.times.idle;
+  }
+  if (lastCpuTimes) {
+    const idleDiff = totalIdle - lastCpuTimes.idle;
+    const tickDiff = totalTick - lastCpuTimes.total;
+    sysCpu = tickDiff > 0 ? Math.round(100 - (idleDiff / tickDiff * 100)) : 0;
+  }
+  lastCpuTimes = { idle: totalIdle, total: totalTick };
+  const totalMem = os.totalmem();
+  const freeMem = os.freemem();
+  sysRam = Math.round((totalMem - freeMem) / (1024 * 1024 * 1024));
+}
+
+function refreshNetLatency() {
+  const { exec } = require('child_process');
+  exec('ping -c 1 -t 1 8.8.8.8 2>/dev/null | grep -o "time=[0-9.]*" | cut -d= -f2', { timeout: 2000 }, (err, stdout) => {
+    if (!err && stdout.trim()) {
+      sysNet = Math.round(parseFloat(stdout.trim()));
+    } else {
+      sysNet = -1;
+    }
   });
 }
 
@@ -429,12 +465,16 @@ function render() {
   const onlineTag = externalStatus.online_detected ? (GREEN + ' ONLINE' + RESET) : (YELLOW + ' OFFLINE' + RESET);
   out += ESC + '1;' + (w - 50) + 'H' + '[' + modeBadge + ']' + focusTag + '  ' + onlineTag + '  ' + icon + ' ' + (serverRunning ? 'RUNNING' : 'STOPPED') + ' :' + SERVER_PORT + RESET;
   if (showMode !== 'live') {
-    out += ESC + '2;' + Math.floor((w - 30) / 2) + 'H' + YELLOW + BOLD + '  [Shift+S] Start Show to go LIVE  ' + RESET + ESC + '0K';
+    out += ESC + '2;' + Math.floor((w - 35) / 2) + 'H' + YELLOW + BOLD + '  [Shift+S] Start Show to go LIVE  ' + RESET + ESC + '0K';
   }
+  // System stats row
+  const statsRow = showMode === 'live' ? 2 : 3;
+  const netStr = sysNet < 0 ? DIM + '--ms' + RESET : (sysNet < 30 ? GREEN : sysNet < 60 ? YELLOW : RED) + sysNet + 'ms' + RESET;
+  out += ESC + statsRow + ';' + (w - 36) + 'H' + DIM + 'CPU ' + WHITE + sysCpu + '%' + RESET + DIM + '  RAM ' + WHITE + sysRam + '%' + RESET + DIM + '  Net ' + netStr + RESET + ESC + '0K';
 
   const lw = Math.floor((w - 3) / 2);
   const rw = w - 3 - lw;
-  const ct = showMode === 'live' ? 3 : 4, ch = 7;
+  const ct = showMode === 'live' ? 3 : 5, ch = 7;
 
   // Now Playing — from REAPER bridge state
   const npHighlight = focus === 'main';
@@ -1233,6 +1273,8 @@ async function init() {
   }
   await loadSongCache();
   await refreshState();
+  refreshNetLatency();
+  setInterval(refreshNetLatency, 30000);
   // Sync show mode to server
   apiPost('/api/show-mode', { mode: showMode }).catch(() => {});
   render();
