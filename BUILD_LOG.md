@@ -664,3 +664,9 @@ IP addresses are captured at singer signup time via `req.ip` and stored on each 
 | `data/queue.json` | +`banned_singers`, +`promote_count` |
 | `data/banned-log.json` | **NEW** — persistent ban records |
 | `BUILD_LOG.md` | +this session |
+
+### Edits / Updates
+
+- **[2026-07-13]** Kick message changed from aggressive to polite: `"Thanks for singing! Have a great night!"` — kicked singers just think they got their one song. No drama.
+- **[2026-07-13]** `start-show` now defaults to `connect` mode (SETUP), not `live`. Press `Shift+S` in TUI to go LIVE. Prevents accidental Dell kiosk activation.
+- **[2026-07-13]** TUI shows prominent yellow `[Shift+S] Start Show to go LIVE` banner in setup mode. `SETUP` badge replaces `CONNECTED`.

@@ -359,7 +359,7 @@ function render() {
   const onlineTag = externalStatus.online_detected ? (GREEN + ' ONLINE' + RESET) : (YELLOW + ' OFFLINE' + RESET);
   out += ESC + '1;' + (w - 50) + 'H' + '[' + modeBadge + ']' + focusTag + '  ' + onlineTag + '  ' + icon + ' ' + (serverRunning ? 'RUNNING' : 'STOPPED') + ' :' + SERVER_PORT + RESET;
   if (showMode !== 'live') {
-    out += ESC + '2;' + Math.floor((w - 30) / 2) + 'H' + YELLOW + BOLD + '  [s] Start Show to go LIVE  ' + RESET + ESC + '0K';
+    out += ESC + '2;' + Math.floor((w - 30) / 2) + 'H' + YELLOW + BOLD + '  [Shift+S] Start Show to go LIVE  ' + RESET + ESC + '0K';
   }
 
   const lw = Math.floor((w - 3) / 2);
@@ -464,7 +464,7 @@ function render() {
         ? `${BOLD}[p]${RESET} Promote  ${BOLD}[x]${RESET} Remove  ${BOLD}[B]${RESET} Kick  ${BOLD}[c]${RESET} Round  ${BOLD}[a]${RESET} Add Singer`
         : `${BOLD}[x]${RESET} Remove  ${BOLD}[a]${RESET} Add Band`)
     : `${BOLD}[a]${RESET} Search+Add`;
-  const row1 = `${navKeys}  ${queueKeys}  ${BOLD}[E]${RESET} Export  ${BOLD}[I]${RESET} Import  ${BOLD}[?]${RESET} Settings  ${BOLD}[q]${RESET} Quit${showMode === 'connected' ? `  ${BOLD}[s]${RESET} Start Show` : ''}`;
+  const row1 = `${navKeys}  ${queueKeys}  ${BOLD}[E]${RESET} Export  ${BOLD}[I]${RESET} Import  ${BOLD}[?]${RESET} Settings  ${BOLD}[q]${RESET} Quit${showMode === 'connected' ? `  ${BOLD}[Shift+S]${RESET} Start Show` : ''}`;
   const row2 = `${karaokeLabel}  ${netLabel}  ${BOLD}[e]${RESET} Sync  ${BOLD}[w]${RESET} WiFi  ${BOLD}[r]${RESET} Restart`;
   out += drawText(at + 1, 3, row1);
   out += drawText(at + 2, 3, row2);
@@ -977,7 +977,7 @@ function handleInput(chunk) {
         break;
       case 0x72: case 0x52: doAction('restart'); break;
       case 0x77: case 0x57: showWifiInfo = true; render(); break; // w/W = WiFi info
-      case 0x73: case 0x53: // s/S — Start Show
+      case 0x53: // Shift+S — Start Show
         if (showMode === 'connected') {
           showMode = 'live';
           apiPost('/api/show-mode', { mode: 'live' }).catch(() => {});
