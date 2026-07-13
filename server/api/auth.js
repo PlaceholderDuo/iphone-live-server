@@ -69,8 +69,19 @@ function authRoutes(app) {
       device_id: cfg.device_id,
       has_password: !!cfg.password,
       karaoke_enabled: cfg.karaoke_enabled !== false,
-      karaoke_paused_message: cfg.karaoke_paused_message || ''
+      karaoke_paused_message: cfg.karaoke_paused_message || '',
+      max_songs_between_band: cfg.max_songs_between_band || 8
     });
+  });
+
+  app.post('/api/config/update', (req, res) => {
+    const cfg = loadConfig();
+    const { max_songs_between_band } = req.body || {};
+    if (max_songs_between_band !== undefined) {
+      cfg.max_songs_between_band = Math.max(0, parseInt(max_songs_between_band) || 0);
+    }
+    saveConfig(cfg);
+    res.json({ ok: true, max_songs_between_band: cfg.max_songs_between_band });
   });
 }
 

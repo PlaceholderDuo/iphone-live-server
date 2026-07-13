@@ -10,6 +10,7 @@
   "teleprompter_refresh_ms": 1000,
   "karaoke_enabled": true,
   "karaoke_paused_message": "Guest singers is paused right now. Follow us @PlaceholderDuo to find our next events - see you again soon!",
+  "max_songs_between_band": 12,
   "devices": {
     "iphone7-danny-01": {
       "name": "Danny's iPhone 7",

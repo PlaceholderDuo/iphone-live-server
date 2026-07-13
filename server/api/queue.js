@@ -14,7 +14,8 @@ function defaultQueue() {
     current_index: -1,
     status: 'stopped',
     current_song: null,
-    round: 1
+    round: 1,
+    promote_count: 0
   };
 }
 
@@ -29,6 +30,24 @@ function loadQueue() {
 
 function saveQueue(q) {
   fs.writeFileSync(QUEUE_PATH, JSON.stringify(q, null, 2) + '\n', 'utf-8');
+}
+
+function promoteBandSong(q) {
+  if (!q.band_queue || q.band_queue.length === 0) return null;
+  const bandSong = q.band_queue.shift();
+  const entry = {
+    slug: bandSong.slug,
+    title: bandSong.title,
+    artist: bandSong.artist,
+    key: bandSong.key || '',
+    bpm: bandSong.bpm || 0,
+    singer: 'Placeholder Duo',
+    band_song: true,
+    timestamp: Date.now()
+  };
+  q.main_queue.push(entry);
+  q.promote_count = 0;
+  return entry;
 }
 
 function queueRoutes(app) {
@@ -202,7 +221,8 @@ function queueRoutes(app) {
     const q = loadQueue();
     res.json({
       queue: q.singer_queue,
-      round: q.round
+      round: q.round,
+      promote_count: q.promote_count || 0
     });
   });
 
@@ -297,22 +317,11 @@ function queueRoutes(app) {
   app.post('/api/singer/clear-round', (req, res) => {
     const q = loadQueue();
     q.singer_queue = q.singer_queue.filter(e => e.round !== q.round);
-    // Auto-promote a band_queue song into the main_queue for this round
+    q.promote_count = 0;
     if (!q.band_queue) q.band_queue = [];
     let promotedBand = null;
     if (q.band_queue.length > 0) {
-      const bandSong = q.band_queue.shift();
-      promotedBand = bandSong;
-      q.main_queue.push({
-        slug: bandSong.slug,
-        title: bandSong.title,
-        artist: bandSong.artist,
-        key: bandSong.key || '',
-        bpm: bandSong.bpm || 0,
-        singer: 'Placeholder Duo',
-        band_song: true,
-        timestamp: Date.now()
-      });
+      promotedBand = promoteBandSong(q);
     }
     q.round++;
     saveQueue(q);
@@ -333,8 +342,17 @@ function queueRoutes(app) {
       singer: item.singer,
       timestamp: Date.now()
     });
+    if (q.promote_count === undefined) q.promote_count = 0;
+    q.promote_count++;
+    const cfg = authApi.loadConfig();
+    const maxBetween = cfg.max_songs_between_band || 999;
+    const remainingSingers = q.singer_queue.filter(e => e.round === q.round).length;
+    let bandPromoted = null;
+    if (q.promote_count >= maxBetween && remainingSingers > 0 && q.band_queue && q.band_queue.length > 0) {
+      bandPromoted = promoteBandSong(q);
+    }
     saveQueue(q);
-    res.json({ ok: true, promoted: item });
+    res.json({ ok: true, promoted: item, band_promoted: bandPromoted, promote_count: q.promote_count });
   });
 
   app.get('/api/queue/current', (req, res) => {

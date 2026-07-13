@@ -4,6 +4,7 @@ const cookieParser = require('cookie-parser');
 const { authRoutes, requireAuth, checkAuth } = require('./api/auth');
 const { songsRoutes } = require('./api/songs');
 const { queueRoutes } = require('./api/queue');
+const { setlistRoutes } = require('./api/setlists');
 
 const app = express();
 const PORT = process.env.PORT || 3300;
@@ -92,7 +93,7 @@ app.use('/api', (req, res, next) => {
     return next();
   }
   // Queue read-only is public (needed by teleprompter kiosk + singer page + TUI)
-  if (req.method === 'GET' && (req.path === '/queue' || req.path === '/queue/current' || req.path === '/band-queue')) {
+  if (req.method === 'GET' && (req.path === '/queue' || req.path === '/queue/current' || req.path === '/band-queue' || req.path === '/setlists')) {
     return next();
   }
   requireAuth(req, res, next);
@@ -103,6 +104,9 @@ songsRoutes(app);
 
 // Queue routes
 queueRoutes(app);
+
+// Setlist routes
+setlistRoutes(app);
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`iPhoneLiveServer running on http://0.0.0.0:${PORT}`);

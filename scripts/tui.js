@@ -56,6 +56,14 @@ let nameInputMode = false;
 let nameInputBuffer = '';
 let nameInputFor = null;
 let showWifiInfo = false;
+let setlistMode = false;
+let setlistList = [];
+let setlistCursor = 0;
+let settingsMode = false;
+let settingsField = null;
+let settingsValue = '';
+let maxSongsBetweenBand = 8;
+let promoteCount = 0;
 let wifiSSID = '';
 let wifiPassword = '';
 let lanIP = '127.0.0.1';
@@ -154,11 +162,16 @@ async function refreshState() {
     if (bandCursor >= (queueState.band_queue || []).length) bandCursor = Math.max(0, (queueState.band_queue || []).length - 1);
   }
   const sq = await apiGet('/api/singer/queue');
-  if (sq) singerQueue = sq;
+  if (sq) {
+    singerQueue = sq;
+    promoteCount = sq.promote_count || 0;
+  }
   const es = await apiGet('/api/singer/external-status');
   if (es) externalStatus = es;
   const ks = await apiGet('/api/singer/status');
   if (ks) { karaokeEnabled = ks.karaoke_enabled; karaokePausedMsg = ks.karaoke_paused_message || ''; }
+  const cfg = await apiGet('/api/config');
+  if (cfg && cfg.max_songs_between_band !== undefined) maxSongsBetweenBand = cfg.max_songs_between_band || 0;
   // Poll REAPER state from port 3000
   await refreshReaperState();
   // Poll connected clients
@@ -227,6 +240,18 @@ async function doAction(action, arg) {
     case 'remove-band':
       if (arg !== undefined) result = await apiPost('/api/band-queue/item/' + arg, {}, 'DELETE');
       break;
+    case 'export-setlist':
+      if (arg) result = await apiPost('/api/setlists/export', { name: arg, songs: (queueState.main_queue || []).map(s => ({ slug: s.slug })) });
+      break;
+    case 'import-setlist':
+      if (arg) result = await apiPost('/api/setlists/import', { name: arg, mode: 'replace' });
+      break;
+    case 'append-setlist':
+      if (arg) result = await apiPost('/api/setlists/import', { name: arg, mode: 'append' });
+      break;
+    case 'update-settings':
+      if (arg) result = await apiPost('/api/config/update', arg);
+      break;
     case 'restart':
       stopServer();
       setTimeout(() => startServer(), 2000);
@@ -279,6 +304,10 @@ async function doAction(action, arg) {
       else if (action === 'remove') log(`Removed index ${arg}`);
       else if (action === 'remove-singer') log(`Removed singer`);
       else if (action === 'remove-band') log(`Removed band song`);
+      else if (action === 'export-setlist') log(`Setlist exported: ${arg}`);
+      else if (action === 'import-setlist') log(`Setlist loaded: ${arg} (${result?.added || 0} songs)`);
+      else if (action === 'append-setlist') log(`Setlist appended: ${arg} (+${result?.added || 0} songs)`);
+      else if (action === 'update-settings') log(`Settings updated`);
     } else if (result.error) {
       log(`Error: ${result.error}`);
     }
@@ -310,6 +339,8 @@ function render() {
   if (inputMode || nameInputMode) { renderSearch(); return; }
   if (confirmMode) { renderConfirm(); return; }
   if (showWifiInfo) { renderWiFiInfo(); return; }
+  if (setlistMode) { renderSetlistPicker(); return; }
+  if (settingsMode) { renderSettings(); return; }
 
   const cols = process.stdout.columns || 80;
   const rows = process.stdout.rows || 30;
@@ -399,7 +430,7 @@ function render() {
     : (DIM + 'Dell not connected' + RESET);
   const phoneClients = connectedClients.filter(c => (c.ip || '').startsWith('192.')).length;
   out += drawText(st + 1, 3, WHITE +
-    `Singers ${WHITE}${BOLD}${sc}${RESET}${WHITE}  Band ${WHITE}${BOLD}${bc}${RESET}${WHITE}  Round ${singerQueue.round || 1} ${DIM}·${WHITE} ` +
+    `Singers ${WHITE}${BOLD}${sc}${RESET}${WHITE}  Band ${WHITE}${BOLD}${bc}${RESET}${WHITE}  Round ${singerQueue.round || 1} (${promoteCount}/${maxSongsBetweenBand}) ${DIM}·${WHITE} ` +
     `Ext ${WHITE}${BOLD}${extPend}${RESET}${WHITE} ${syncLabel} ${DIM}·${WHITE} Karaoke ${karaokeIcon}${WHITE} ${DIM}·${WHITE} ${modeLabel}${WHITE} ${DIM}·${WHITE} ${dellStr}` +
     (reaperState.currentSong ? ` ${DIM}·${WHITE} ${GREEN + reaperState.currentSong.substring(0,20) + RESET}` : '') + RESET);
   const boxHost = lanIP || process.env.SHOW_IP || 'localhost';
@@ -429,8 +460,8 @@ function render() {
         ? `${BOLD}[p]${RESET} Promote  ${BOLD}[x]${RESET} Remove  ${BOLD}[c]${RESET} Round  ${BOLD}[a]${RESET} Add Singer`
         : `${BOLD}[x]${RESET} Remove  ${BOLD}[a]${RESET} Add Band`)
     : `${BOLD}[a]${RESET} Search+Add`;
-  const row1 = `${navKeys}  ${queueKeys}  ${BOLD}[w]${RESET} WiFi  ${BOLD}[r]${RESET} Restart  ${BOLD}[q]${RESET} Quit${showMode === 'connected' ? `  ${BOLD}[s]${RESET} Start Show` : ''}`;
-  const row2 = `${karaokeLabel}  ${netLabel}  ${BOLD}[e]${RESET} Sync`;
+  const row1 = `${navKeys}  ${queueKeys}  ${BOLD}[E]${RESET} Export  ${BOLD}[I]${RESET} Import  ${BOLD}[?]${RESET} Settings  ${BOLD}[q]${RESET} Quit${showMode === 'connected' ? `  ${BOLD}[s]${RESET} Start Show` : ''}`;
+  const row2 = `${karaokeLabel}  ${netLabel}  ${BOLD}[e]${RESET} Sync  ${BOLD}[w]${RESET} WiFi  ${BOLD}[r]${RESET} Restart`;
   out += drawText(at + 1, 3, row1);
   out += drawText(at + 2, 3, row2);
 
@@ -541,6 +572,67 @@ function renderWiFiInfo() {
   process.stdout.write(out);
 }
 
+function renderSetlistPicker() {
+  const cols = process.stdout.columns || 80;
+  const rows = process.stdout.rows || 30;
+  const w = cols;
+
+  let out = HIDE;
+  const boxH = Math.min(rows - 4, 18);
+  const boxTop = Math.max(1, Math.floor((rows - boxH) / 2));
+
+  out += drawBox(boxTop, 2, w - 3, boxH, 'IMPORT SETLIST');
+  out += drawText(boxTop + 1, 4, `${BOLD}Select a setlist to load (${setlistList.length} found):${RESET}`);
+
+  const resH = boxH - 4;
+  for (let i = 0; i < resH; i++) {
+    const l = boxTop + 3 + i;
+    if (i < setlistList.length) {
+      const s = setlistList[i];
+      const cur = setlistCursor === i ? (INV + ' ' + RESET) : ' ';
+      out += drawText(l, 4, cur + ' ' + (setlistCursor === i ? BOLD : '') +
+        s.label.substring(0, w - 28) + (setlistCursor === i ? RESET : '') +
+        '  ' + DIM + s.songs + ' songs  ' + s.modified.substring(0, 10) + RESET);
+    } else {
+      out += drawText(l, 4, ' '.repeat(w - 8));
+    }
+  }
+  if (setlistList.length === 0) {
+    out += drawText(boxTop + 3, 4, DIM + 'No setlists found. Export some first with E.' + RESET);
+  }
+
+  const foot = boxTop + boxH - 2;
+  out += drawText(foot, 4, DIM + 'Enter load (then r=replace a=append)  Esc cancel' + RESET);
+  process.stdout.write(out);
+}
+
+function renderSettings() {
+  const cols = process.stdout.columns || 80;
+  const rows = process.stdout.rows || 30;
+  const w = cols;
+
+  let out = HIDE;
+  const boxW = Math.min(55, w - 4);
+  const boxH = 7;
+  const bx = Math.floor((w - boxW) / 2);
+  const by = Math.floor(rows / 2) - 3;
+
+  out += drawBox(by, bx, boxW, boxH, 'SETTINGS');
+  out += drawText(by + 1, bx + 2, `${BOLD}Max songs between band:{RESET}  ${CYAN}${maxSongsBetweenBand}${RESET}  ${DIM}(0 = every round)${RESET}`);
+  out += drawText(by + 2, bx + 3, DIM + `${maxSongsBetweenBand === 0 ? 'Band plays every round' : 'Band plays every ' + maxSongsBetweenBand + ' promoted singers'}` + RESET);
+
+  if (settingsField === 'max_songs') {
+    out += drawText(by + 3, bx + 2, `${BOLD}New value:${RESET} ` + CYAN + settingsValue + '█' + RESET);
+    out += drawText(by + 4, bx + 2, DIM + 'Enter save  Esc cancel  0 = every round' + RESET);
+  } else {
+    out += drawText(by + 3, bx + 2, DIM + 'Enter to edit  Esc to close' + RESET);
+  }
+
+  out += drawText(by + 5, bx + 2, `Karaoke: ${karaokeEnabled ? GREEN + 'ON' + RESET : RED + 'OFF' + RESET}  ${DIM}Round ${singerQueue.round || 1}${RESET}`);
+
+  process.stdout.write(out);
+}
+
 function doSearch(query) {
   const q = query.toLowerCase().trim();
   if (!q) { searchResults = []; searchCursor = 0; return; }
@@ -562,6 +654,21 @@ function enterSearchMode(target) {
   nameInputBuffer = '';
   nameInputFor = null;
   renderSearch();
+}
+
+async function enterSetlistMode() {
+  setlistMode = true;
+  setlistCursor = 0;
+  const r = await apiGet('/api/setlists');
+  setlistList = (r && r.setlists) ? r.setlists : [];
+  renderSetlistPicker();
+}
+
+function enterSettingsMode() {
+  settingsMode = true;
+  settingsField = null;
+  settingsValue = '';
+  renderSettings();
 }
 
 function handleInput(chunk) {
@@ -682,6 +789,65 @@ function handleInput(chunk) {
     return;
   }
 
+  // In setlist picker mode
+  if (setlistMode) {
+    if (chunk[0] === 0x1b && chunk.length >= 3 && chunk[1] === 0x5b) {
+      const dir = chunk[2];
+      if (dir === 0x41) { setlistCursor = Math.max(0, setlistCursor - 1); renderSetlistPicker(); }
+      else if (dir === 0x42) { setlistCursor = Math.min(setlistList.length - 1, setlistCursor + 1); renderSetlistPicker(); }
+      return;
+    }
+    for (const ch of chunk) {
+      if (ch === 27) { setlistMode = false; render(); return; }
+      if (ch === 13 && setlistList.length > 0 && setlistCursor < setlistList.length) {
+        const selected = setlistList[setlistCursor];
+        setlistMode = false;
+        render();
+        doAction('import-setlist', selected.name).then(() => render());
+        return;
+      }
+    }
+    return;
+  }
+
+  // In settings mode
+  if (settingsMode) {
+    for (const ch of chunk) {
+      if (ch === 27) {
+        if (settingsField) { settingsField = null; settingsValue = ''; renderSettings(); }
+        else { settingsMode = false; render(); }
+        return;
+      }
+      if (ch === 13) {
+        if (!settingsField) {
+          settingsField = 'max_songs';
+          settingsValue = String(maxSongsBetweenBand);
+          renderSettings();
+        } else {
+          const val = parseInt(settingsValue);
+          if (!isNaN(val) && val >= 0) {
+            settingsMode = false;
+            settingsField = null;
+            settingsValue = '';
+            render();
+            doAction('update-settings', { max_songs_between_band: val }).then(() => render());
+          }
+        }
+        return;
+      }
+      if (settingsField && ch === 127 || settingsField && ch === 8) {
+        settingsValue = settingsValue.slice(0, -1);
+        renderSettings();
+        return;
+      }
+      if (settingsField && ch >= 0x30 && ch <= 0x39) {
+        settingsValue += String.fromCharCode(ch);
+        renderSettings();
+      }
+    }
+    return;
+  }
+
   // Normal mode key handling
   // Handle arrow keys in normal mode
   if (chunk[0] === 0x1b && chunk.length >= 3 && chunk[1] === 0x5b) {
@@ -715,11 +881,38 @@ function handleInput(chunk) {
       case 0x6F: doAction('toggle-external'); break; // o = toggle online/offline
       case 0x4F: doAction('retry-online'); break;    // O = retry internet detection
       case 0x65: doAction('sync-external'); break;    // e = sync now
+      case 0x45: // E — export setlist
+        if (!setlistMode && !inputMode && !settingsMode) {
+          doAction('export-setlist', 'Setlist_' + new Date().toISOString().split('T')[0]);
+        }
+        break;
+      case 0x49: // I — import setlist
+        if (!inputMode && !confirmMode && !showWifiInfo) {
+          enterSetlistMode();
+        }
+        break;
+      case 0x3F: // ? — settings
+        if (!inputMode && !confirmMode && !showWifiInfo && !setlistMode) {
+          enterSettingsMode();
+        }
+        break;
       case 0x09: // Tab — toggle queue view (singers / band)
         if (focus === 'queue') {
           queueView = queueView === 'singers' ? 'band' : 'singers';
           render();
         }
+        break;
+      case 0x45: case 0x65: // E/e — export setlist
+        if (!(ch === 0x65)) { // 0x65 is also 'e' for sync-external, skip
+          if (inputMode || setlistMode || settingsMode) break;
+          setlistMode = false; settingsMode = false;
+          doAction('export-setlist', 'Setlist_' + new Date().toISOString().split('T')[0]).then(() => render());
+        }
+        break;
+      case 0x49: case 0x69: // I/i — import setlist
+        if (ch === 0x69) break; // skip lowercase i
+        if (inputMode || confirmMode || showWifiInfo) break;
+        enterSetlistMode();
         break;
       case 0x70: case 0x50: // p/P — promote singer (only in singers mode)
         if (focus === 'queue' && queueView === 'singers') {
@@ -801,7 +994,7 @@ async function init() {
   process.stdin.setRawMode(true);
   process.stdin.resume();
   process.stdin.on('data', handleInput);
-  process.stdout.on('resize', () => { if (!inputMode && !nameInputMode && !confirmMode && !showWifiInfo) render(); else if (inputMode || nameInputMode) renderSearch(); });
+  process.stdout.on('resize', () => { if (!inputMode && !nameInputMode && !confirmMode && !showWifiInfo && !setlistMode && !settingsMode) render(); else if (inputMode || nameInputMode) renderSearch(); else if (setlistMode) renderSetlistPicker(); else if (settingsMode) renderSettings(); });
   process.on('exit', () => { process.stdout.write(SHOW); });
   process.on('SIGINT', () => { process.stdout.write(SHOW); process.exit(0); });
   process.on('SIGTERM', () => { process.stdout.write(SHOW); process.exit(0); });
@@ -828,7 +1021,7 @@ async function init() {
   setInterval(async () => {
     await checkServer();
     await refreshState();
-    if (!inputMode && !nameInputMode && !confirmMode && !showWifiInfo) render();
+    if (!inputMode && !nameInputMode && !confirmMode && !showWifiInfo && !setlistMode && !settingsMode) render();
   }, 2000);
 }
 
