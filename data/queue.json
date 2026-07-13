@@ -22,6 +22,14 @@
       "artist": "Free",
       "singer": "Alice",
       "timestamp": 1783973642426
+    },
+    {
+      "slug": "All Right Now",
+      "title": "All Right Now",
+      "artist": "Free",
+      "key": "A",
+      "bpm": 120,
+      "timestamp": 1783974823325
     }
   ],
   "singer_queue": [

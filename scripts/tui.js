@@ -62,6 +62,8 @@ let setlistCursor = 0;
 let settingsMode = false;
 let settingsField = null;
 let settingsValue = '';
+let exportMode = false;
+let exportBuffer = '';
 let maxSongsBetweenBand = 8;
 let promoteCount = 0;
 let wifiSSID = '';
@@ -341,7 +343,7 @@ function render() {
   if (confirmMode) { renderConfirm(); return; }
   if (showWifiInfo) { renderWiFiInfo(); return; }
   if (setlistMode) { renderSetlistPicker(); return; }
-  if (settingsMode) { renderSettings(); return; }
+  if (settingsMode || exportMode) { renderSettings(); return; }
 
   const cols = process.stdout.columns || 80;
   const rows = process.stdout.rows || 30;
@@ -536,7 +538,7 @@ function renderConfirm() {
   const rows = process.stdout.rows || 30;
   const w = cols;
 
-  let out = HIDE;
+  let out = HIDE + CLS;
 
   const isKick = confirmAction === 'kick-singer';
   const boxW = Math.min(isKick ? 55 : 50, w - 4);
@@ -544,8 +546,7 @@ function renderConfirm() {
   const bx = Math.floor((w - boxW) / 2);
   const by = Math.floor(rows / 2) - 2;
 
-  out += HIDE;
-  out += drawBox(by, bx, boxW, boxH, isKick ? RED + ' ⚠ KICK SINGER ⚠ ' + RESET : '');
+  out += drawBox(by, bx, boxW, boxH, isKick ? RED + ' KICK SINGER ' + RESET : '');
   if (isKick) {
     out += drawText(by + 1, bx + 2, RED + BOLD + `Kick & ban "${(confirmItem?.title || 'this singer').replace('KICK ', '').substring(0, boxW - 20)}"?` + RESET);
     out += drawText(by + 2, bx + 3, DIM + 'Removes all their songs. Banned for rest of show.' + RESET);
@@ -580,7 +581,7 @@ function renderSetlistPicker() {
   const rows = process.stdout.rows || 30;
   const w = cols;
 
-  let out = HIDE;
+  let out = HIDE + CLS;
   const boxH = Math.min(rows - 4, 18);
   const boxTop = Math.max(1, Math.floor((rows - boxH) / 2));
 
@@ -614,7 +615,21 @@ function renderSettings() {
   const rows = process.stdout.rows || 30;
   const w = cols;
 
-  let out = HIDE;
+  let out = HIDE + CLS;
+
+  if (exportMode) {
+    const boxW = Math.min(45, w - 4);
+    const boxH = 5;
+    const bx = Math.floor((w - boxW) / 2);
+    const by = Math.floor(rows / 2) - 2;
+    out += drawBox(by, bx, boxW, boxH, 'EXPORT SETLIST');
+    out += drawText(by + 1, bx + 2, `${BOLD}Setlist name:${RESET} ` + CYAN + exportBuffer + (exportBuffer.length < boxW - 18 ? '█' : '') + RESET);
+    out += drawText(by + 2, bx + 3, DIM + `Saving ${(queueState.main_queue || []).length} songs` + RESET);
+    out += drawText(by + 3, bx + 2, DIM + 'Enter save  Esc cancel' + RESET);
+    process.stdout.write(out);
+    return;
+  }
+
   const boxW = Math.min(55, w - 4);
   const boxH = 7;
   const bx = Math.floor((w - boxW) / 2);
@@ -819,8 +834,28 @@ function handleInput(chunk) {
     return;
   }
 
-  // In settings mode
-  if (settingsMode) {
+  // In settings or export mode
+  if (settingsMode || exportMode) {
+    // Export mode — type name
+    if (exportMode) {
+      for (const ch of chunk) {
+        if (ch === 27) { exportMode = false; exportBuffer = ''; render(); return; }
+        if (ch === 13) {
+          const name = exportBuffer.trim();
+          if (name) {
+            exportMode = false;
+            exportBuffer = '';
+            render();
+            doAction('export-setlist', name).then(() => render());
+          }
+          return;
+        }
+        if (ch === 127 || ch === 8) { exportBuffer = exportBuffer.slice(0, -1); renderSettings(); return; }
+        if (ch >= 32 && ch <= 126) { exportBuffer += String.fromCharCode(ch); renderSettings(); }
+      }
+      return;
+    }
+    // Settings mode
     for (const ch of chunk) {
       if (ch === 27) {
         if (settingsField) { settingsField = null; settingsValue = ''; renderSettings(); }
@@ -890,9 +925,11 @@ function handleInput(chunk) {
       case 0x6F: doAction('toggle-external'); break; // o = toggle online/offline
       case 0x4F: doAction('retry-online'); break;    // O = retry internet detection
       case 0x65: doAction('sync-external'); break;    // e = sync now
-      case 0x45: // E — export setlist
-        if (!setlistMode && !inputMode && !settingsMode) {
-          doAction('export-setlist', 'Setlist_' + new Date().toISOString().split('T')[0]);
+      case 0x45: // E — export setlist (prompt for name)
+        if (!setlistMode && !settingsMode && !exportMode) {
+          exportMode = true;
+          exportBuffer = '';
+          renderSettings();
         }
         break;
       case 0x49: // I — import setlist
@@ -1015,7 +1052,7 @@ async function init() {
   process.stdin.setRawMode(true);
   process.stdin.resume();
   process.stdin.on('data', handleInput);
-  process.stdout.on('resize', () => { if (!inputMode && !nameInputMode && !confirmMode && !showWifiInfo && !setlistMode && !settingsMode) render(); else if (inputMode || nameInputMode) renderSearch(); else if (setlistMode) renderSetlistPicker(); else if (settingsMode) renderSettings(); });
+  process.stdout.on('resize', () => { if (!inputMode && !nameInputMode && !confirmMode && !showWifiInfo && !setlistMode && !settingsMode && !exportMode) render(); else if (inputMode || nameInputMode) renderSearch(); else if (setlistMode) renderSetlistPicker(); else if (settingsMode || exportMode) renderSettings(); });
   process.on('exit', () => { process.stdout.write(SHOW); });
   process.on('SIGINT', () => { process.stdout.write(SHOW); process.exit(0); });
   process.on('SIGTERM', () => { process.stdout.write(SHOW); process.exit(0); });
@@ -1042,7 +1079,7 @@ async function init() {
   setInterval(async () => {
     await checkServer();
     await refreshState();
-    if (!inputMode && !nameInputMode && !confirmMode && !showWifiInfo && !setlistMode && !settingsMode) render();
+    if (!inputMode && !nameInputMode && !confirmMode && !showWifiInfo && !setlistMode && !settingsMode && !exportMode) render();
   }, 2000);
 }
 
