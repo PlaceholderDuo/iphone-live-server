@@ -28,7 +28,7 @@ const BG_ORANGE = ESC + '48;2;255;136;0m';
 
 let serverProcess = null;
 let serverRunning = false;
-let queueState = { main_queue: [], current_index: -1, current_song: null, status: 'stopped' };
+let queueState = { main_queue: [], band_queue: [], current_index: -1, current_song: null, status: 'stopped' };
 let singerQueue = { queue: [], round: 1 };
 let reaperState = { currentSong: null, position: 0, bpm: 0, nextSong: null, playing: false };
 let externalStatus = { external_pending: 0, total_pending: 0, sync_enabled: true };
@@ -37,9 +37,10 @@ let songCache = [];
 let karaokeEnabled = true;
 let karaokePausedMsg = '';
 
-// UI state
 let focus = 'main';
-let queueCursor = 0;
+let queueView = 'singers';
+let singerCursor = 0;
+let bandCursor = 0;
 let inputMode = false;
 let confirmMode = false;
 let confirmItem = null;
@@ -76,12 +77,12 @@ function apiGet(path) {
   });
 }
 
-function apiPost(path, body) {
+function apiPost(path, body, method) {
   return new Promise((resolve) => {
     const data = JSON.stringify(body || {});
     const opts = {
       hostname: 'localhost', port: SERVER_PORT, path,
-      method: 'POST',
+      method: method || 'POST',
       headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) }
     };
     if (authToken) opts.headers['x-auth-token'] = authToken;
@@ -143,7 +144,9 @@ async function refreshState() {
   const q = await apiGet('/api/queue');
   if (q) {
     queueState = q;
-    if (queueCursor >= (q.main_queue || []).length) queueCursor = Math.max(0, q.main_queue.length - 1);
+    if (!q.band_queue) queueState.band_queue = [];
+    if (singerCursor >= (singerQueue.queue || []).length) singerCursor = Math.max(0, (singerQueue.queue || []).length - 1);
+    if (bandCursor >= (queueState.band_queue || []).length) bandCursor = Math.max(0, (queueState.band_queue || []).length - 1);
   }
   const sq = await apiGet('/api/singer/queue');
   if (sq) singerQueue = sq;
@@ -201,11 +204,20 @@ async function doAction(action, arg) {
     case 'add':
       if (arg) result = await apiPost('/api/queue/add', { slug: arg });
       break;
+    case 'add-singer':
+      if (arg) result = await apiPost('/api/singer/add', { singer: 'Band', song_slug: arg });
+      break;
+    case 'add-band':
+      if (arg) result = await apiPost('/api/band-queue/add', { slug: arg });
+      break;
     case 'promote':
       if (arg) result = await apiPost('/api/singer/promote', { id: arg });
       break;
     case 'remove':
       if (arg !== undefined) result = await apiPost('/api/queue/remove-multiple', { indexes: [arg] });
+      break;
+    case 'remove-band':
+      if (arg !== undefined) result = await apiPost('/api/band-queue/item/' + arg, {}, 'DELETE');
       break;
     case 'restart':
       stopServer();
@@ -236,8 +248,14 @@ async function doAction(action, arg) {
       else if (action === 'add') {
         const song = songCache.find(s => s.slug === arg);
         log(`Added: ${song?.title || arg}`);
-        focus = 'queue';
-        queueCursor = singerQueue.queue.length - 1;
+      }
+      else if (action === 'add-singer') {
+        const song = songCache.find(s => s.slug === arg);
+        log(`Singer add: ${song?.title || arg}`);
+      }
+      else if (action === 'add-band') {
+        const song = songCache.find(s => s.slug === arg);
+        log(`Band queue: ${song?.title || arg}`);
       }
       else if (action === 'promote') {
         log(`Promoted: ${result.promoted?.singer || '?'} — ${result.promoted?.song_title || '?'}`);
@@ -248,6 +266,7 @@ async function doAction(action, arg) {
       else if (action === 'retry-online') log(result.online_detected ? 'Internet detected — sync enabled' : 'Still offline');
       else if (action === 'remove') log(`Removed index ${arg}`);
       else if (action === 'remove-singer') log(`Removed singer`);
+      else if (action === 'remove-band') log(`Removed band song`);
     } else if (result.error) {
       log(`Error: ${result.error}`);
     }
@@ -291,7 +310,8 @@ function render() {
   out += ESC + '1;1H' + BG_ORANGE + ' '.repeat(w) + RESET;
   out += ESC + '1;2H' + WHITE + BOLD + ' ♪ LIVE SHOW SERVER  ' + RESET + DIM + WHITE + 'v1.0' + RESET;
   const modeBadge = showMode === 'live' ? (GREEN + 'LIVE' + RESET) : (ORANGE + 'CONNECTED' + RESET);
-  const focusTag = focus === 'queue' ? ' [' + CYAN + 'QUEUE' + RESET + ']' : '';
+  const focusLabel = focus === 'queue' ? (queueView === 'singers' ? 'SINGERS' : 'BAND') : 'REAPER';
+  const focusTag = ' [' + CYAN + focusLabel + RESET + ']';
   const onlineTag = externalStatus.online_detected ? (GREEN + ' ONLINE' + RESET) : (YELLOW + ' OFFLINE' + RESET);
   out += ESC + '1;' + (w - 40) + 'H' + '[' + modeBadge + ']' + focusTag + '  ' + onlineTag + '  ' + icon + ' ' + (serverRunning ? 'RUNNING' : 'STOPPED') + ' :' + SERVER_PORT + RESET;
 
@@ -310,40 +330,53 @@ function render() {
     out += drawText(ct + 3, 3, `${DIM}Bar${RESET} ${bar}  ${DIM}BPM${RESET} ${s.bpm || '-'}  ${DIM}Pos${RESET} ${Math.floor(s.position || 0)}s`);
     const nextLabel = s.nextSong ? 'Next: ' + s.nextSong : '';
     out += drawText(ct + 4, 3, s.playing ? (GREEN + '● PLAYING' + RESET) : (YELLOW + '● PAUSED' + RESET) + '  ' + DIM + nextLabel + RESET);
-    if (npHighlight) out += drawText(ct + 5, 3, DIM + '(← → to switch panels)' + RESET);
+    if (npHighlight) out += drawText(ct + 5, 3, DIM + '(← → switch panels, Tab toggles queue view)' + RESET);
   } else {
     out += drawText(ct + 2, 3, DIM + 'REAPER not connected' + RESET);
     out += drawText(ct + 3, 3, DIM + 'Start REAPER + load show project' + RESET);
-    if (npHighlight) out += drawText(ct + 5, 3, DIM + '(→ to singer queue)' + RESET);
+    if (npHighlight) out += drawText(ct + 5, 3, DIM + '(→ to queue panel)' + RESET);
   }
 
-  // Singer Queue panel
+  // Queue panel — dynamic: singers or band queue
   const qr = lw + 2;
   const qHighlight = focus === 'queue';
-  out += drawBox(ct, qr, rw, ch, `SINGERS (${singerQueue.queue?.length || 0})`, qHighlight);
-  const q = singerQueue.queue || [];
+  const isSingers = queueView === 'singers';
+  const panelQueue = isSingers ? (singerQueue.queue || []) : (queueState.band_queue || []);
+  const panelTitle = isSingers ? `SINGERS (${singerQueue.queue?.length || 0})` : `BAND QUEUE (${(queueState.band_queue || []).length})`;
+  out += drawBox(ct, qr, rw, ch, panelTitle, qHighlight);
   const mv = ch - 2;
-  let scrollStart = qHighlight ? Math.max(0, Math.min(queueCursor - Math.floor(mv / 2), Math.max(0, q.length - mv))) : 0;
-  scrollStart = Math.max(0, Math.min(scrollStart, Math.max(0, q.length - mv)));
+  let scrollStart = qHighlight ? Math.max(0, Math.min((isSingers ? singerCursor : bandCursor) - Math.floor(mv / 2), Math.max(0, panelQueue.length - mv))) : 0;
+  scrollStart = Math.max(0, Math.min(scrollStart, Math.max(0, panelQueue.length - mv)));
 
   for (let i = 0; i < mv; i++) {
     const idx = scrollStart + i;
-    if (idx >= q.length) { out += drawText(ct + 1 + i, qr + 2, ' '.repeat(rw - 4)); continue; }
-    const item = q[idx];
-    const isCursor = qHighlight && idx === queueCursor;
+    if (idx >= panelQueue.length) { out += drawText(ct + 1 + i, qr + 2, ' '.repeat(rw - 4)); continue; }
+    const item = panelQueue[idx];
+    const cursorIdx = isSingers ? singerCursor : bandCursor;
+    const isCursor = qHighlight && idx === cursorIdx;
     const n = (idx + 1 + '').padStart(2);
     const cursorMark = isCursor ? (INV + ' ' + RESET) : ' ';
     const style = isCursor ? (INV + BOLD) : DIM;
-    const name = (item.singer || '?').substring(0, rw - 20);
-    const song = ((item.song_title || '?') + ' — ' + (item.song_artist || '')).substring(0, rw - 10);
-    out += drawText(ct + 1 + i, qr + 1, style + cursorMark + ' ' + n + '. ' + name + '  ' + DIM + song + RESET);
+    if (isSingers) {
+      const name = (item.singer || '?').substring(0, rw - 20);
+      const song = ((item.song_title || '?') + ' — ' + (item.song_artist || '')).substring(0, rw - 10);
+      out += drawText(ct + 1 + i, qr + 1, style + cursorMark + ' ' + n + '. ' + name + '  ' + DIM + song + RESET);
+    } else {
+      const title = (item.title || '?').substring(0, rw - 10);
+      const artist = (item.artist || '').substring(0, rw - 10);
+      out += drawText(ct + 1 + i, qr + 1, style + cursorMark + ' ' + n + '. ' + title + '  ' + DIM + artist + (item.key ? ' [' + item.key + ']' : '') + RESET);
+    }
   }
-  if (q.length === 0) out += drawText(ct + 3, qr + 2, DIM + 'No singers waiting' + RESET);
+  if (panelQueue.length === 0) {
+    const msg = isSingers ? 'No singers waiting' : 'No band songs queued';
+    out += drawText(ct + 3, qr + 2, DIM + msg + RESET);
+  }
 
   // Stats bar
   const st = ct + ch;
   out += ESC + st + ';1H' + BG_ORANGE + ' '.repeat(w) + RESET;
   const sc = singerQueue.queue?.length || 0;
+  const bc = (queueState.band_queue || []).length;
   const extPend = externalStatus.external_pending || 0;
   const modeLabel = externalStatus.online_detected ? (GREEN + 'ONLINE' + RESET) : (YELLOW + 'OFFLINE' + RESET);
   const syncLabel = externalStatus.sync_enabled ? (GREEN + 'sync' + RESET) : (DIM + 'off' + RESET);
@@ -354,7 +387,7 @@ function render() {
     : (DIM + 'Dell not connected' + RESET);
   const phoneClients = connectedClients.filter(c => (c.ip || '').startsWith('192.')).length;
   out += drawText(st + 1, 3, WHITE +
-    `Singers ${WHITE}${BOLD}${sc}${RESET}${WHITE}  Round ${singerQueue.round || 1} ${DIM}·${WHITE} ` +
+    `Singers ${WHITE}${BOLD}${sc}${RESET}${WHITE}  Band ${WHITE}${BOLD}${bc}${RESET}${WHITE}  Round ${singerQueue.round || 1} ${DIM}·${WHITE} ` +
     `Ext ${WHITE}${BOLD}${extPend}${RESET}${WHITE} ${syncLabel} ${DIM}·${WHITE} Karaoke ${karaokeIcon}${WHITE} ${DIM}·${WHITE} ${modeLabel}${WHITE} ${DIM}·${WHITE} ${dellStr}` +
     (reaperState.currentSong ? ` ${DIM}·${WHITE} ${GREEN + reaperState.currentSong.substring(0,20) + RESET}` : '') + RESET);
   const boxHost = lanIP || process.env.SHOW_IP || 'localhost';
@@ -378,12 +411,12 @@ function render() {
   out += drawBox(at, 1, w - 1, ah, 'ACTIONS');
   const karaokeLabel = karaokeEnabled ? (RED + '[shift+k]' + RESET + ' Pause') : (GREEN + '[shift+k]' + RESET + ' Karaoke ON');
   const netLabel = externalStatus.online_detected ? (CYAN + '[o]' + RESET + ' Offline') : (YELLOW + '[o]' + RESET + ' Online');
-  const navKeys = focus === 'queue'
-    ? `${BOLD}[↑↓]${RESET} Navigate  ${BOLD}[→]${RESET} REAPER`
-    : `${BOLD}[→]${RESET} Singers`;
+  const navKeys = `${BOLD}[←→]${RESET} Panel  ${focus === 'queue' ? BOLD + '[Tab] ' + (queueView === 'singers' ? 'Band Queue' : 'Singers') + RESET : ''}`;
   const queueKeys = focus === 'queue'
-    ? `${BOLD}[p]${RESET} Promote  ${BOLD}[x]${RESET} Remove  ${BOLD}[c]${RESET} Round  ${BOLD}[a]${RESET} Add`
-    : `${BOLD}[p]${RESET} Promote  ${BOLD}[a]${RESET} Search+Add`;
+    ? (queueView === 'singers'
+        ? `${BOLD}[p]${RESET} Promote  ${BOLD}[x]${RESET} Remove  ${BOLD}[c]${RESET} Round  ${BOLD}[a]${RESET} Add Song`
+        : `${BOLD}[x]${RESET} Remove  ${BOLD}[a]${RESET} Add Band`)
+    : `${BOLD}[a]${RESET} Search+Add`;
   const row1 = `${navKeys}  ${queueKeys}  ${BOLD}[w]${RESET} WiFi  ${BOLD}[r]${RESET} Restart  ${BOLD}[q]${RESET} Quit${showMode === 'connected' ? `  ${BOLD}[s]${RESET} Start Show` : ''}`;
   const row2 = `${karaokeLabel}  ${netLabel}  ${BOLD}[e]${RESET} Sync`;
   out += drawText(at + 1, 3, row1);
@@ -521,7 +554,11 @@ function handleInput(chunk) {
           const song = searchResults[searchCursor];
           inputMode = false;
           render();
-          doAction('add', song.slug).then(() => render());
+          if (focus === 'queue' && queueView === 'band') {
+            doAction('add-band', song.slug).then(() => render());
+          } else {
+            doAction('add', song.slug).then(() => render());
+          }
           return;
         }
         searchCursor = 0;
@@ -552,6 +589,8 @@ function handleInput(chunk) {
             const id = q[confirmRemoveIndex].id;
             apiPost('/api/singer/queue/' + encodeURIComponent(id), {}, 'DELETE');
           }
+        } else if (action === 'remove-band') {
+          apiPost('/api/band-queue/item/' + confirmRemoveIndex, {}, 'DELETE');
         }
         confirmMode = false;
         confirmItem = null;
@@ -581,16 +620,22 @@ function handleInput(chunk) {
   // Handle arrow keys in normal mode
   if (chunk[0] === 0x1b && chunk.length >= 3 && chunk[1] === 0x5b) {
     const dir = chunk[2];
-    // → right = switch to queue
+    // → right = switch to queue panel
     if (dir === 0x43) { focus = 'queue'; render(); return; }
     // ← left = switch to now playing
     if (dir === 0x44) { focus = 'main'; render(); return; }
-    // ↑ / ↓ in queue focus
+    // ↑ / ↓ in queue focus — navigate the displayed queue
     if (focus === 'queue' && (dir === 0x41 || dir === 0x42)) {
-      const q = queueState.main_queue || [];
+      const isSingers = queueView === 'singers';
+      const q = isSingers ? (singerQueue.queue || []) : (queueState.band_queue || []);
       if (q.length === 0) return;
-      if (dir === 0x41) queueCursor = Math.max(0, queueCursor - 1); // Up
-      else queueCursor = Math.min(q.length - 1, queueCursor + 1);   // Down
+      if (isSingers) {
+        if (dir === 0x41) singerCursor = Math.max(0, singerCursor - 1);
+        else singerCursor = Math.min(q.length - 1, singerCursor + 1);
+      } else {
+        if (dir === 0x41) bandCursor = Math.max(0, bandCursor - 1);
+        else bandCursor = Math.min(q.length - 1, bandCursor + 1);
+      }
       render();
       return;
     }
@@ -604,28 +649,42 @@ function handleInput(chunk) {
       case 0x6F: doAction('toggle-external'); break; // o = toggle online/offline
       case 0x4F: doAction('retry-online'); break;    // O = retry internet detection
       case 0x65: doAction('sync-external'); break;    // e = sync now
-      case 0x70: case 0x50: // p/P — promote singer
+      case 0x09: // Tab — toggle queue view (singers / band)
         if (focus === 'queue') {
+          queueView = queueView === 'singers' ? 'band' : 'singers';
+          render();
+        }
+        break;
+      case 0x70: case 0x50: // p/P — promote singer (only in singers mode)
+        if (focus === 'queue' && queueView === 'singers') {
           const q = singerQueue.queue || [];
-          if (q.length > 0 && queueCursor >= 0 && queueCursor < q.length) {
-            doAction('promote', q[queueCursor].id);
+          if (q.length > 0 && singerCursor >= 0 && singerCursor < q.length) {
+            doAction('promote', q[singerCursor].id);
           }
         }
         break;
-      case 0x78: case 0x58: // x/X — remove singer
+      case 0x78: case 0x58: // x/X — remove from current queue
         if (focus === 'queue') {
-          const q = singerQueue.queue || [];
-          if (q.length > 0 && queueCursor >= 0 && queueCursor < q.length) {
-            confirmMode = true;
-            confirmItem = { title: q[queueCursor].singer + ' — ' + q[queueCursor].song_title };
-            confirmRemoveIndex = queueCursor;
-            confirmAction = 'remove-singer';
-            renderConfirm();
+          if (queueView === 'singers') {
+            const q = singerQueue.queue || [];
+            if (q.length > 0 && singerCursor >= 0 && singerCursor < q.length) {
+              confirmMode = true;
+              confirmRemoveIndex = singerCursor;
+              confirmItem = { title: q[singerCursor].singer + ' — ' + q[singerCursor].song_title };
+              confirmAction = 'remove-singer';
+              renderConfirm();
+            }
+          } else {
+            const bq = queueState.band_queue || [];
+            if (bq.length > 0 && bandCursor >= 0 && bandCursor < bq.length) {
+              doAction('remove-band', bandCursor);
+              if (bandCursor >= bq.length - 1 && bq.length > 1) bandCursor = bq.length - 2;
+            }
           }
         }
         break;
-      case 0x63: case 0x43: // c/C — clear round
-        if (focus === 'queue') doAction('clear-round');
+      case 0x63: case 0x43: // c/C — clear round (only in singers mode)
+        if (focus === 'queue' && queueView === 'singers') doAction('clear-round');
         break;
       case 0x61: case 0x41: enterSearchMode(); break;
       case 0x72: case 0x52: doAction('restart'); break;

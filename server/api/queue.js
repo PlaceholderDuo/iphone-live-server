@@ -10,6 +10,7 @@ function defaultQueue() {
   return {
     main_queue: [],
     singer_queue: [],
+    band_queue: [],
     current_index: -1,
     status: 'stopped',
     current_song: null,
@@ -35,6 +36,7 @@ function queueRoutes(app) {
     const q = loadQueue();
     res.json({
       main_queue: q.main_queue,
+      band_queue: q.band_queue || [],
       current_index: q.current_index,
       status: q.status,
       current_song: q.current_song,
@@ -294,11 +296,27 @@ function queueRoutes(app) {
 
   app.post('/api/singer/clear-round', (req, res) => {
     const q = loadQueue();
-    q.singer_queue = q.singer_queue.filter(e => e.round === q.round);
-    q.singer_queue = [];
+    q.singer_queue = q.singer_queue.filter(e => e.round !== q.round);
+    // Auto-promote a band_queue song into the main_queue for this round
+    if (!q.band_queue) q.band_queue = [];
+    let promotedBand = null;
+    if (q.band_queue.length > 0) {
+      const bandSong = q.band_queue.shift();
+      promotedBand = bandSong;
+      q.main_queue.push({
+        slug: bandSong.slug,
+        title: bandSong.title,
+        artist: bandSong.artist,
+        key: bandSong.key || '',
+        bpm: bandSong.bpm || 0,
+        singer: 'Placeholder Duo',
+        band_song: true,
+        timestamp: Date.now()
+      });
+    }
     q.round++;
     saveQueue(q);
-    res.json({ ok: true, round: q.round });
+    res.json({ ok: true, round: q.round, band_promoted: promotedBand });
   });
 
   app.post('/api/singer/promote', (req, res) => {
@@ -348,6 +366,49 @@ function queueRoutes(app) {
     }
     saveQueue(q);
     res.json({ ok: true, queue: q.main_queue });
+  });
+
+  // ─── Band queue (auto-rotated into main_queue each singer round) ───
+
+  app.get('/api/band-queue', (req, res) => {
+    const q = loadQueue();
+    res.json({ band_queue: q.band_queue || [] });
+  });
+
+  app.post('/api/band-queue/add', (req, res) => {
+    const { slug } = req.body || {};
+    if (!slug) return res.status(400).json({ error: 'slug required' });
+    const info = songsApi.getSong(slug);
+    if (!info || !info.meta) return res.status(400).json({ error: 'Song not found' });
+    const q = loadQueue();
+    if (!q.band_queue) q.band_queue = [];
+    q.band_queue.push({
+      slug,
+      title: info.meta.title || slug,
+      artist: info.meta.artist || 'Unknown',
+      key: info.meta.key || '',
+      bpm: info.meta.bpm || 0,
+      timestamp: Date.now()
+    });
+    saveQueue(q);
+    res.json({ ok: true, band_queue: q.band_queue });
+  });
+
+  app.delete('/api/band-queue/item/:index', (req, res) => {
+    const idx = parseInt(req.params.index);
+    const q = loadQueue();
+    if (!q.band_queue) q.band_queue = [];
+    if (idx < 0 || idx >= q.band_queue.length) return res.status(400).json({ error: 'Invalid index' });
+    q.band_queue.splice(idx, 1);
+    saveQueue(q);
+    res.json({ ok: true, band_queue: q.band_queue });
+  });
+
+  app.post('/api/band-queue/clear', (req, res) => {
+    const q = loadQueue();
+    q.band_queue = [];
+    saveQueue(q);
+    res.json({ ok: true });
   });
 
   // ─── External request sync (github pages → jsonblob → singer queue) ───

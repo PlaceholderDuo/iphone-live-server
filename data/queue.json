@@ -31,21 +31,22 @@
       "key": "G",
       "bpm": 120,
       "timestamp": 1783971182089
-    }
-  ],
-  "singer_queue": [
+    },
     {
-      "id": "mrjmc4qx13qp",
-      "singer": "dan",
-      "song_slug": "A Boy Named Sue",
-      "song_title": "A Boy Named Sue",
-      "song_artist": "Johnny Cash",
-      "timestamp": 1783971108105,
-      "round": 1
+      "slug": "All Right Now",
+      "title": "All Right Now",
+      "artist": "Free",
+      "key": "A",
+      "bpm": 120,
+      "singer": "Placeholder Duo",
+      "band_song": true,
+      "timestamp": 1783972220915
     }
   ],
+  "singer_queue": [],
+  "band_queue": [],
   "current_index": -1,
   "status": "stopped",
   "current_song": null,
-  "round": 1
+  "round": 3
 }

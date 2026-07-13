@@ -91,8 +91,8 @@ app.use('/api', (req, res, next) => {
   if (req.method === 'GET' && (req.path.startsWith('/songs'))) {
     return next();
   }
-  // Queue read-only is public (needed by teleprompter kiosk + singer page)
-  if (req.method === 'GET' && (req.path === '/queue' || req.path === '/queue/current')) {
+  // Queue read-only is public (needed by teleprompter kiosk + singer page + TUI)
+  if (req.method === 'GET' && (req.path === '/queue' || req.path === '/queue/current' || req.path === '/band-queue')) {
     return next();
   }
   requireAuth(req, res, next);
