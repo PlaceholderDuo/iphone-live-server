@@ -353,15 +353,18 @@ function render() {
   const icon = serverRunning ? (GREEN + '●' + RESET) : (RED + '●' + RESET);
   out += ESC + '1;1H' + BG_ORANGE + ' '.repeat(w) + RESET;
   out += ESC + '1;2H' + WHITE + BOLD + ' ♪ LIVE SHOW SERVER  ' + RESET + DIM + WHITE + 'v1.0' + RESET;
-  const modeBadge = showMode === 'live' ? (GREEN + 'LIVE' + RESET) : (ORANGE + 'CONNECTED' + RESET);
+  const modeBadge = showMode === 'live' ? (GREEN + 'LIVE' + RESET) : (YELLOW + 'SETUP' + RESET);
   const focusLabel = focus === 'queue' ? (queueView === 'singers' ? 'SINGERS' : 'BAND') : 'REAPER';
   const focusTag = ' [' + CYAN + focusLabel + RESET + ']';
   const onlineTag = externalStatus.online_detected ? (GREEN + ' ONLINE' + RESET) : (YELLOW + ' OFFLINE' + RESET);
-  out += ESC + '1;' + (w - 40) + 'H' + '[' + modeBadge + ']' + focusTag + '  ' + onlineTag + '  ' + icon + ' ' + (serverRunning ? 'RUNNING' : 'STOPPED') + ' :' + SERVER_PORT + RESET;
+  out += ESC + '1;' + (w - 50) + 'H' + '[' + modeBadge + ']' + focusTag + '  ' + onlineTag + '  ' + icon + ' ' + (serverRunning ? 'RUNNING' : 'STOPPED') + ' :' + SERVER_PORT + RESET;
+  if (showMode !== 'live') {
+    out += ESC + '2;' + Math.floor((w - 30) / 2) + 'H' + YELLOW + BOLD + '  [s] Start Show to go LIVE  ' + RESET + ESC + '0K';
+  }
 
   const lw = Math.floor((w - 3) / 2);
   const rw = w - 3 - lw;
-  const ct = 3, ch = 7;
+  const ct = showMode === 'live' ? 3 : 4, ch = 7;
 
   // Now Playing — from REAPER bridge state
   const npHighlight = focus === 'main';

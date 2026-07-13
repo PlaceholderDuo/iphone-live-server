@@ -7,7 +7,7 @@
 
 set +e
 
-MODE="${1:-live}"
+MODE="${1:-connect}"
 
 case "$MODE" in
   connect) TUI_FLAG="--connect"; MODE_LABEL="CONNECT"; DELL_LABEL="standby — press [s] in TUI to go live";;

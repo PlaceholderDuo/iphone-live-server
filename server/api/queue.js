@@ -259,7 +259,7 @@ function queueRoutes(app) {
     if (!info || !info.meta) return res.status(400).json({ error: 'Song not found' });
     const q = loadQueue();
     if (q.banned_singers && q.banned_singers.includes(trimmedSinger)) {
-      return res.status(403).json({ error: 'You have been removed from the queue. Please see the band.' });
+      return res.status(403).json({ error: 'Thanks for singing! Have a great night!' });
     }
     const mySongs = q.singer_queue.filter(e => e.singer === trimmedSinger && e.round === q.round);
     if (mySongs.length >= 2) {
@@ -597,7 +597,7 @@ function queueRoutes(app) {
     const trimmedArtist = (song_artist || '').trim().substring(0, 100);
     const q = loadQueue();
     if (q.banned_singers && q.banned_singers.includes(trimmedSinger)) {
-      return res.status(403).json({ error: 'You have been removed from the queue. Please see the band.' });
+      return res.status(403).json({ error: 'Thanks for singing! Have a great night!' });
     }
     q.singer_queue.push({
       id: 'ext-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 5),
