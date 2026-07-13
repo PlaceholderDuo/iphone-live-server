@@ -6,7 +6,7 @@
       "artist": "Free",
       "key": "A",
       "bpm": 120,
-      "timestamp": 1783973642079
+      "timestamp": 1783975224161
     },
     {
       "slug": "Brown Eyed Girl",
@@ -14,22 +14,31 @@
       "artist": "Van Morrison",
       "key": "G",
       "bpm": 120,
-      "timestamp": 1783973642080
+      "timestamp": 1783975224162
     },
     {
-      "slug": "All Right Now",
-      "title": "All Right Now",
-      "artist": "Free",
-      "singer": "Alice",
-      "timestamp": 1783973642426
-    },
-    {
-      "slug": "All Right Now",
-      "title": "All Right Now",
-      "artist": "Free",
-      "key": "A",
+      "slug": "American Girl",
+      "title": "American Girl",
+      "artist": "Tom Petty and The Heartbreakers",
+      "key": "",
       "bpm": 120,
-      "timestamp": 1783974823325
+      "timestamp": 1783975224163
+    },
+    {
+      "slug": "Proud Mary",
+      "title": "PROUD MARY",
+      "artist": "Creedence Clearwater Revival",
+      "key": "",
+      "bpm": 120,
+      "timestamp": 1783975224165
+    },
+    {
+      "slug": "A Boy Named Sue",
+      "title": "A Boy Named Sue",
+      "artist": "Johnny Cash",
+      "key": "Bb",
+      "bpm": 120,
+      "timestamp": 1783975224166
     }
   ],
   "singer_queue": [
@@ -62,40 +71,7 @@
       "ip": "127.0.0.1"
     }
   ],
-  "band_queue": [
-    {
-      "slug": "(I Can't Get No) Satisfaction",
-      "title": "(I Can't Get No) Satisfaction",
-      "artist": "The Rolling Stones",
-      "key": "E",
-      "bpm": 120,
-      "timestamp": 1783972665540
-    },
-    {
-      "slug": "ACHY BREAKY HEART",
-      "title": "ACHY BREAKY HEART",
-      "artist": "Billy Ray Cyrus",
-      "key": "",
-      "bpm": 120,
-      "timestamp": 1783972672097
-    },
-    {
-      "slug": "Addicted to Love",
-      "title": "Addicted to Love",
-      "artist": "Robert Palmer",
-      "key": "A",
-      "bpm": 120,
-      "timestamp": 1783972689047
-    },
-    {
-      "slug": "Proud Mary",
-      "title": "PROUD MARY",
-      "artist": "Creedence Clearwater Revival",
-      "key": "",
-      "bpm": 120,
-      "timestamp": 1783973642196
-    }
-  ],
+  "band_queue": [],
   "current_index": -1,
   "status": "stopped",
   "current_song": null,

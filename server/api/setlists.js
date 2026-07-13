@@ -79,6 +79,7 @@ function setlistRoutes(app) {
     const { loadQueue, saveQueue } = require('./queue');
     const q = loadQueue();
     const added = [];
+    const failed = [];
     for (const slug of result.slugs) {
       const info = songsApi.getSong(slug);
       if (info && info.meta) {
@@ -90,6 +91,8 @@ function setlistRoutes(app) {
           bpm: info.meta.bpm || 0,
           timestamp: Date.now() + added.length
         });
+      } else {
+        failed.push(slug);
       }
     }
     if (mode === 'replace') {
@@ -101,7 +104,7 @@ function setlistRoutes(app) {
       q.main_queue.push(...added);
     }
     saveQueue(q);
-    res.json({ ok: true, file: result.file, added: added.length, queue: q.main_queue });
+    res.json({ ok: true, file: result.file, added: added.length, total: result.slugs.length, failed, queue: q.main_queue });
   });
 
   app.delete('/api/setlists/:name', (req, res) => {
