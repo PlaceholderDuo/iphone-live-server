@@ -874,3 +874,41 @@ Settings overlay (`?`) had broken arrow key navigation. Escape sequences (`\x1b[
 ### Bumper Volume Behavior
 
 Volume changes restart the current track immediately at the new volume for instant feedback. Volume persists to `~/.bumper-volume`. On next bridge server restart, it loads the saved volume.
+
+---
+
+## Session 11: System Stats + Bumper Auto-Next Fix — 2026-07-13
+
+`#music #iphoneliveserver #stats #bumper`
+
+### MacBook System Stats Row
+
+Compact stats in top-right corner of TUI, polled efficiently:
+
+| Metric | Source | Frequency | Display |
+|--------|--------|-----------|---------|
+| CPU | `os.cpus()` delta | Every 2s | `CPU 14%` |
+| RAM | `os.freemem()` / `os.totalmem()` | Every 2s | `RAM 12GB` (used) |
+| Temp | `pmset -g therm` | Every 30s | `Temp OK` / `WARM` / `HOT!` |
+| Net | `ping 8.8.8.8` | Every 30s | `Net 19ms` (green/yellow/red) |
+
+Temperature uses thermal pressure level (not raw °C) because M1 Macs don't expose sensor temperature without sudo. Thermal pressure is more useful — it tells you when the system is actually throttling.
+
+### Bumper Auto-Next Fix
+
+**Root cause**: `bumperPlay()` calls `bumperStop()` internally to clean up any old process. `bumperStop()` sets `bumperExplicitStop = true`. When the track ended naturally, the exit handler saw `bumperExplicitStop = true` and skipped auto-next, thinking it was an intentional stop.
+
+**Fix**: `bumperPlay()` now resets `bumperExplicitStop = false` after calling `bumperStop()`. This way, natural track endings correctly trigger auto-next, while intentional stops (via API) still set the flag through `bumperStop()` directly.
+
+Also fixed: `bumperStop()` now calls `removeAllListeners("exit")` before killing the process, preventing the old process's exit handler from firing after a new track has started.
+
+### Skip Tracks
+
+`POST /bumper/api/skip` now works correctly. Skips to next random track immediately.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `scripts/tui.js` | +system stats functions (refreshSysStats, refreshNetLatency, refreshThermal), +stats row in render |
+| `web/server.js` (LSM bridge) | +`bumperExplicitStop = false` in bumperPlay, +`removeAllListeners` in bumperStop, +thermal pressure check |
