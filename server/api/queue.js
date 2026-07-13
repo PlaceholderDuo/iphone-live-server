@@ -15,7 +15,8 @@ function defaultQueue() {
     status: 'stopped',
     current_song: null,
     round: 1,
-    promote_count: 0
+    promote_count: 0,
+    banned_singers: []
   };
 }
 
@@ -257,6 +258,9 @@ function queueRoutes(app) {
     const info = songsApi.getSong(song_slug);
     if (!info || !info.meta) return res.status(400).json({ error: 'Song not found' });
     const q = loadQueue();
+    if (q.banned_singers && q.banned_singers.includes(trimmedSinger)) {
+      return res.status(403).json({ error: 'You have been removed from the queue. Please see the band.' });
+    }
     const mySongs = q.singer_queue.filter(e => e.singer === trimmedSinger && e.round === q.round);
     if (mySongs.length >= 2) {
       return res.status(400).json({ error: 'You already have 2 songs in the queue' });
@@ -268,7 +272,8 @@ function queueRoutes(app) {
       song_title: info.meta.title || song_slug,
       song_artist: info.meta.artist || 'Unknown',
       timestamp: Date.now(),
-      round: q.round
+      round: q.round,
+      ip: req.ip || req.socket?.remoteAddress || 'unknown'
     });
     saveQueue(q);
     const position = q.singer_queue.filter(e => e.singer === trimmedSinger && e.round === q.round).length - 1;
@@ -326,6 +331,39 @@ function queueRoutes(app) {
     q.round++;
     saveQueue(q);
     res.json({ ok: true, round: q.round, band_promoted: promotedBand });
+  });
+
+  app.post('/api/singer/kick', (req, res) => {
+    const { singer } = req.body || {};
+    if (!singer || !singer.trim()) return res.status(400).json({ error: 'Singer name required' });
+    const trimmedSinger = singer.trim();
+    const q = loadQueue();
+    if (!q.banned_singers) q.banned_singers = [];
+    // Already banned?
+    if (q.banned_singers.includes(trimmedSinger)) {
+      // Remove any remaining songs
+      const remaining = q.singer_queue.filter(e => e.singer === trimmedSinger);
+      q.singer_queue = q.singer_queue.filter(e => e.singer !== trimmedSinger);
+      saveQueue(q);
+      return res.json({ ok: true, removed: remaining.length, already_banned: true });
+    }
+    const entries = q.singer_queue.filter(e => e.singer === trimmedSinger);
+    if (entries.length === 0) return res.status(404).json({ error: 'Singer not found in queue' });
+    q.banned_singers.push(trimmedSinger);
+    q.singer_queue = q.singer_queue.filter(e => e.singer !== trimmedSinger);
+    saveQueue(q);
+    // Log to persistent banned log
+    logBanned(trimmedSinger, entries);
+    res.json({ ok: true, removed: entries.length, singer: trimmedSinger });
+  });
+
+  app.get('/api/singer/banned', (req, res) => {
+    const q = loadQueue();
+    res.json({ banned: q.banned_singers || [] });
+  });
+  app.get('/api/singer/banned', (req, res) => {
+    const q = loadQueue();
+    res.json({ banned: q.banned_singers || [] });
   });
 
   app.post('/api/singer/promote', (req, res) => {
@@ -489,7 +527,7 @@ function queueRoutes(app) {
               id: 'ext-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 5),
               singer: name, song_slug: '', song_title: songTitle,
               song_artist: (item.artist || '').trim(), timestamp: item.time || Date.now(),
-              round: q.round, external: true, ext_id: item.time + '-' + name
+              round: q.round, external: true, ext_id: item.time + '-' + name, ip: 'remote'
             });
             added++;
           }
@@ -558,10 +596,14 @@ function queueRoutes(app) {
     const trimmedTitle = song_title.trim().substring(0, 100);
     const trimmedArtist = (song_artist || '').trim().substring(0, 100);
     const q = loadQueue();
+    if (q.banned_singers && q.banned_singers.includes(trimmedSinger)) {
+      return res.status(403).json({ error: 'You have been removed from the queue. Please see the band.' });
+    }
     q.singer_queue.push({
       id: 'ext-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 5),
       singer: trimmedSinger, song_slug: '', song_title: trimmedTitle,
-      song_artist: trimmedArtist, timestamp: Date.now(), round: q.round, external: true
+      song_artist: trimmedArtist, timestamp: Date.now(), round: q.round, external: true,
+      ip: req.ip || req.socket?.remoteAddress || 'unknown'
     });
     saveQueue(q);
     res.json({ ok: true, position: q.singer_queue.length });
@@ -582,6 +624,28 @@ function triggerLoad(slug) {
   } catch (e) {
     // silently fail - reaper might not be running
   }
+}
+
+const BANNED_LOG = path.join(DATA_DIR, 'banned-log.json');
+
+function logBanned(singer, entries) {
+  const ips = [...new Set(entries.map(e => e.ip || 'unknown').filter(Boolean))];
+  const songs = entries.map(e => e.song_title || e.song_slug).filter(Boolean);
+  const record = {
+    singer,
+    songs,
+    ips,
+    time: new Date().toISOString(),
+    round: entries[0]?.round || '?'
+  };
+  let log = [];
+  try {
+    if (fs.existsSync(BANNED_LOG)) {
+      log = JSON.parse(fs.readFileSync(BANNED_LOG, 'utf-8'));
+    }
+  } catch {}
+  log.push(record);
+  fs.writeFileSync(BANNED_LOG, JSON.stringify(log, null, 2) + '\n', 'utf-8');
 }
 
 module.exports = { queueRoutes, loadQueue, saveQueue };

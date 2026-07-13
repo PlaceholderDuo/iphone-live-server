@@ -42,6 +42,16 @@
       "song_artist": "Otis Redding ",
       "timestamp": 1783973642317,
       "round": 1
+    },
+    {
+      "id": "mrjo2f0z2lpx",
+      "singer": "Troublemaker",
+      "song_slug": "All Right Now",
+      "song_title": "All Right Now",
+      "song_artist": "Free",
+      "timestamp": 1783974014099,
+      "round": 1,
+      "ip": "127.0.0.1"
     }
   ],
   "band_queue": [
@@ -82,5 +92,8 @@
   "status": "stopped",
   "current_song": null,
   "round": 1,
-  "promote_count": 1
+  "promote_count": 1,
+  "banned_singers": [
+    "Troublemaker"
+  ]
 }

@@ -303,6 +303,7 @@ async function doAction(action, arg) {
       else if (action === 'retry-online') log(result.online_detected ? 'Internet detected — sync enabled' : 'Still offline');
       else if (action === 'remove') log(`Removed index ${arg}`);
       else if (action === 'remove-singer') log(`Removed singer`);
+      else if (action === 'kick-singer') log(`KICKED: ${result?.singer || '?'} (${result?.removed || '?'} songs)`);
       else if (action === 'remove-band') log(`Removed band song`);
       else if (action === 'export-setlist') log(`Setlist exported: ${arg}`);
       else if (action === 'import-setlist') log(`Setlist loaded: ${arg} (${result?.added || 0} songs)`);
@@ -457,7 +458,7 @@ function render() {
   const navKeys = `${BOLD}[←→]${RESET} Panel  ${focus === 'queue' ? BOLD + '[Tab] ' + (queueView === 'singers' ? 'Band Queue' : 'Singers') + RESET : ''}`;
   const queueKeys = focus === 'queue'
     ? (queueView === 'singers'
-        ? `${BOLD}[p]${RESET} Promote  ${BOLD}[x]${RESET} Remove  ${BOLD}[c]${RESET} Round  ${BOLD}[a]${RESET} Add Singer`
+        ? `${BOLD}[p]${RESET} Promote  ${BOLD}[x]${RESET} Remove  ${BOLD}[B]${RESET} Kick  ${BOLD}[c]${RESET} Round  ${BOLD}[a]${RESET} Add Singer`
         : `${BOLD}[x]${RESET} Remove  ${BOLD}[a]${RESET} Add Band`)
     : `${BOLD}[a]${RESET} Search+Add`;
   const row1 = `${navKeys}  ${queueKeys}  ${BOLD}[E]${RESET} Export  ${BOLD}[I]${RESET} Import  ${BOLD}[?]${RESET} Settings  ${BOLD}[q]${RESET} Quit${showMode === 'connected' ? `  ${BOLD}[s]${RESET} Start Show` : ''}`;
@@ -534,23 +535,22 @@ function renderConfirm() {
 
   let out = HIDE;
 
-  // Draw normal screen dimmed
-  const origFocus = focus;
-  focus = 'queue';
-  inputMode = false;
-  // Just draw a simple confirm overlay
-  const boxW = Math.min(50, w - 4);
-  const boxH = 5;
+  const isKick = confirmAction === 'kick-singer';
+  const boxW = Math.min(isKick ? 55 : 50, w - 4);
+  const boxH = isKick ? 6 : 5;
   const bx = Math.floor((w - boxW) / 2);
   const by = Math.floor(rows / 2) - 2;
 
-  // Semi-transparent overlay effect by redrawing content first
   out += HIDE;
-
-  // Overlay box
-  out += drawBox(by, bx, boxW, boxH, '');
-  out += drawText(by + 1, bx + 2, BOLD + `Remove "${(confirmItem?.title || 'this song').substring(0, boxW - 14)}"?` + RESET);
-  out += drawText(by + 3, bx + 2, DIM + '  y  Yes    n  No (Esc)' + RESET);
+  out += drawBox(by, bx, boxW, boxH, isKick ? RED + ' ⚠ KICK SINGER ⚠ ' + RESET : '');
+  if (isKick) {
+    out += drawText(by + 1, bx + 2, RED + BOLD + `Kick & ban "${(confirmItem?.title || 'this singer').replace('KICK ', '').substring(0, boxW - 20)}"?` + RESET);
+    out += drawText(by + 2, bx + 3, DIM + 'Removes all their songs. Banned for rest of show.' + RESET);
+    out += drawText(by + 4, bx + 2, RED + '  y  Yes, kick them out    n  No (Esc)' + RESET);
+  } else {
+    out += drawText(by + 1, bx + 2, BOLD + `Remove "${(confirmItem?.title || 'this song').substring(0, boxW - 14)}"?` + RESET);
+    out += drawText(by + 3, bx + 2, DIM + '  y  Yes    n  No (Esc)' + RESET);
+  }
 
   process.stdout.write(out);
 }
@@ -764,6 +764,12 @@ function handleInput(chunk) {
           }
         } else if (action === 'remove-band') {
           apiPost('/api/band-queue/item/' + confirmRemoveIndex, {}, 'DELETE');
+        } else if (action === 'kick-singer') {
+          const q = singerQueue.queue || [];
+          if (confirmRemoveIndex >= 0 && confirmRemoveIndex < q.length) {
+            const name = q[confirmRemoveIndex].singer;
+            apiPost('/api/singer/kick', { singer: name });
+          }
         }
         confirmMode = false;
         confirmItem = null;
@@ -913,6 +919,18 @@ function handleInput(chunk) {
         if (ch === 0x69) break; // skip lowercase i
         if (inputMode || confirmMode || showWifiInfo) break;
         enterSetlistMode();
+        break;
+      case 0x42: // B — kick/ban singer (singers view only)
+        if (focus === 'queue' && queueView === 'singers') {
+          const q = singerQueue.queue || [];
+          if (q.length > 0 && singerCursor >= 0 && singerCursor < q.length) {
+            confirmMode = true;
+            confirmRemoveIndex = singerCursor;
+            confirmItem = { title: 'KICK ' + q[singerCursor].singer + ' (ban for this show)' };
+            confirmAction = 'kick-singer';
+            renderConfirm();
+          }
+        }
         break;
       case 0x70: case 0x50: // p/P — promote singer (only in singers mode)
         if (focus === 'queue' && queueView === 'singers') {

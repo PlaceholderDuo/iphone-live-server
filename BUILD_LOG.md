@@ -562,7 +562,105 @@ Also planned: `.md` with inline notes per song for richer prep:
 
 ### Next Steps
 
-- [ ] Implement setlists API + TUI
+- [x] Implement setlists API + TUI
 - [ ] Create a few sample setlists
 - [ ] Genre tagging UI in show control page
 - [ ] Drag-to-reorder queue on mobile
+
+---
+
+## Session 8: Setlists Export/Import + Settings + Kick/Ban — 2026-07-13
+
+`#music #iphoneliveserver #setlists #settings #kick`
+
+### Setlists — Export & Import
+
+Setlists are plain `.txt` files in `data/setlists/`, one song slug per line, `#` comments supported. Import replaces the main queue; export saves the current main queue as a date-stamped file.
+
+**API endpoints:**
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/api/setlists` | List saved setlists (public) |
+| `POST` | `/api/setlists/export` | Save main_queue as `data/setlists/<name>.txt` |
+| `POST` | `/api/setlists/import` | Load setlist, replace main_queue |
+| `DELETE` | `/api/setlists/:name` | Delete a setlist |
+
+**TUI keys:**
+
+| Key | Action |
+|-----|--------|
+| `E` | Export current queue as `Setlist_<date>.txt` |
+| `I` | Open setlist picker → ↑↓ select → Enter to load |
+
+Files stored in `data/setlists/`. New file: `server/api/setlists.js`.
+
+### Settings — max_songs_between_band
+
+Controls how often the band auto-inserts a song during karaoke rounds. When the number of promoted singers reaches this threshold mid-round, a band song is auto-promoted from the band_queue.
+
+- **Default**: `8` — band plays after every 8 promoted singers (plus once per round start)
+- **0** = band plays once per round only (old behavior)
+
+**API**: `GET /api/config` returns `max_songs_between_band`. `POST /api/config/update` sets it.
+
+**TUI**: `?` opens settings overlay → Enter to edit → type new value → Enter saves.
+
+Stats bar shows: `Round 3 (5/8)` — 5 promoted, band inserts at 8.
+
+### Implementation detail — promote counting
+
+The `promote` endpoint now tracks `promote_count`. Each singer promotion increments it. When `promote_count >= max_songs_between_band` AND singers remain AND band_queue has songs → band song auto-inserts into main_queue and counter resets. `clear-round` resets the counter and always auto-promotes a band song for the new round.
+
+### Kick / Ban Singer
+
+Silently removes a singer from the queue and bans them for the rest of the current show. Useful for extreme cases.
+
+**TUI**: `B` in singers view → red "KICK SINGER" confirm dialog → y to kick. Removes all their songs from the current round.
+
+**API**: `POST /api/singer/kick {singer: "name"}` — removes entries, adds to `banned_singers`, logs to persistent file. Banned singers are blocked from re-adding (403 with message).
+
+**Persistent ban log**: `data/banned-log.json` — an array of records, one per kick event:
+
+```json
+[
+  {
+    "singer": "Troublemaker",
+    "songs": ["All Right Now", "Brown Eyed Girl"],
+    "ips": ["192.168.0.50"],
+    "time": "2026-07-13T20:20:13.976Z",
+    "round": 1
+  }
+]
+```
+
+Searchable with standard tools:
+```bash
+# Find a specific singer
+grep '"singer"' data/banned-log.json
+
+# All IPs of banned singers
+grep -o '[0-9]*\.[0-9]*\.[0-9]*\.[0-9]*' data/banned-log.json | sort -u
+
+# Full formatted output
+cat data/banned-log.json | python3 -m json.tool
+```
+
+The ban log is in the project directory (`~/Music/iPhoneLiveServer/data/banned-log.json`) — easy to find, persists across shows, and is git-tracked.
+
+IP addresses are captured at singer signup time via `req.ip` and stored on each singer queue entry. When kicked, all unique IPs from the singer's entries are logged.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `server/api/queue.js` | +`banned_singers`, +kick endpoint, +banned block in add, +IP capture on signup, +promote_count, +`promoteBandSong()` helper, +`logBanned()` |
+| `server/api/setlists.js` | **NEW** — setlist CRUD |
+| `server/api/auth.js` | +`max_songs_between_band` in config, +update endpoint |
+| `server/index.js` | +setlist routes, +whitelist GET /setlists |
+| `scripts/tui.js` | +`E`/`I`/`?`/`B` keys, +setlist picker, +settings overlay, +kick confirm, +promoteCount display |
+| `data/setlists/` | **NEW** — directory for .txt setlist files |
+| `data/config.json` | +`max_songs_between_band: 8` |
+| `data/queue.json` | +`banned_singers`, +`promote_count` |
+| `data/banned-log.json` | **NEW** — persistent ban records |
+| `BUILD_LOG.md` | +this session |
