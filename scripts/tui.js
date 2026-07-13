@@ -62,6 +62,7 @@ let setlistList = [];
 let setlistCursor = 0;
 let settingsMode = false;
 let settingsField = null;
+let settingsCursor = 'max_songs';
 let settingsValue = '';
 let exportMode = false;
 let exportBuffer = '';
@@ -253,6 +254,16 @@ function bumperPost(action) {
     req.write(data);
     req.end();
   });
+}
+
+function adjustBumperVolume(target) {
+  const step = target > bumperVolume ? 'vol-up' : 'vol-down';
+  const steps = Math.abs(target - bumperVolume) / 5;
+  function next(i) {
+    if (i >= steps) { refreshBumper(); return; }
+    bumperPost(step).then(() => { refreshBumper(); setTimeout(() => next(i + 1), 150); });
+  }
+  next(0);
 }
 
 async function doAction(action, arg) {
@@ -539,7 +550,7 @@ function render() {
         : `${BOLD}[Enter]${RESET} Play Now  ${BOLD}[x]${RESET} Remove  ${BOLD}[a]${RESET} Add Song`)
     : `  ${BOLD}[n]${RESET} Next  ${BOLD}[b]${RESET} Prev  ${BOLD}[Space]${RESET} Play  ${BOLD}[a]${RESET} Add`;
   const row1 = `${navKeys}  ${queueKeys}  ${BOLD}[E]${RESET} Export  ${BOLD}[I]${RESET} Import  ${BOLD}[?]${RESET} Settings  ${BOLD}[q]${RESET} Quit${showMode === 'connected' ? `  ${BOLD}[Shift+S]${RESET} Start Show` : ''}`;
-  const row2 = `${karaokeLabel}  ${netLabel}  ${BOLD}[m]${RESET} Bumper  ${BOLD}[ ]${RESET} Vol  ${BOLD}[e]${RESET} Sync  ${BOLD}[w]${RESET} WiFi  ${BOLD}[r]${RESET} Restart`;
+  const row2 = `${karaokeLabel}  ${netLabel}  ${BOLD}[m]${RESET} Bumper  ${BOLD}[e]${RESET} Sync  ${BOLD}[w]${RESET} WiFi  ${BOLD}[r]${RESET} Restart`;
   out += drawText(at + 1, 3, row1);
   out += drawText(at + 2, 3, row2);
 
@@ -703,22 +714,29 @@ function renderSettings() {
   }
 
   const boxW = Math.min(55, w - 4);
-  const boxH = 7;
+  const boxH = 9;
   const bx = Math.floor((w - boxW) / 2);
   const by = Math.floor(rows / 2) - 3;
 
   out += drawBox(by, bx, boxW, boxH, 'SETTINGS');
-  out += drawText(by + 1, bx + 2, `${BOLD}Max songs between band:{RESET}  ${CYAN}${maxSongsBetweenBand}${RESET}  ${DIM}(0 = every round)${RESET}`);
-  out += drawText(by + 2, bx + 3, DIM + `${maxSongsBetweenBand === 0 ? 'Band plays every round' : 'Band plays every ' + maxSongsBetweenBand + ' promoted singers'}` + RESET);
+  const selMark = (f) => settingsCursor === f ? (CYAN + '▶' + RESET + ' ') : '  ';
+  const hi = (f) => (!settingsField && settingsCursor === f) ? INV + BOLD : RESET;
+
+  out += drawText(by + 1, bx + 2, selMark('max_songs') + hi('max_songs') + `Max songs between band:${RESET} ${CYAN}${maxSongsBetweenBand}${RESET}  ${DIM}(0=every round)${RESET}`);
+  out += drawText(by + 2, bx + 2, selMark('bumper_vol') + hi('bumper_vol') + `Bumper volume:${RESET}            ${CYAN}${bumperVolume}%${RESET}`);
+  out += drawText(by + 3, bx + 2, selMark('karaoke') + hi('karaoke') + `Karaoke mode:${RESET}              ${karaokeEnabled ? GREEN + 'ON' + RESET : RED + 'OFF' + RESET}  ${DIM}(Enter=toggle)${RESET}`);
 
   if (settingsField === 'max_songs') {
-    out += drawText(by + 3, bx + 2, `${BOLD}New value:${RESET} ` + CYAN + settingsValue + '█' + RESET);
-    out += drawText(by + 4, bx + 2, DIM + 'Enter save  Esc cancel  0 = every round' + RESET);
+    out += drawText(by + 5, bx + 2, `${BOLD}New value:${RESET} ` + CYAN + settingsValue + '█' + RESET);
+    out += drawText(by + 6, bx + 2, DIM + 'Enter save  Esc cancel  0=every round' + RESET);
+  } else if (settingsField === 'bumper_vol') {
+    out += drawText(by + 5, bx + 2, `${BOLD}New volume:${RESET} ` + CYAN + settingsValue + '% █' + RESET);
+    out += drawText(by + 6, bx + 2, DIM + 'Enter save  Esc cancel  (5-100)' + RESET);
   } else {
-    out += drawText(by + 3, bx + 2, DIM + 'Enter to edit  Esc to close' + RESET);
+    out += drawText(by + 5, bx + 2, DIM + '↑↓ select  Enter edit/toggle  Esc close' + RESET);
   }
 
-  out += drawText(by + 5, bx + 2, `Karaoke: ${karaokeEnabled ? GREEN + 'ON' + RESET : RED + 'OFF' + RESET}  ${DIM}Round ${singerQueue.round || 1}${RESET}`);
+  out += drawText(by + 7, bx + 2, `Round ${singerQueue.round || 1}  ${DIM}ETA ${queueState.eta_minutes || 0}m${RESET}`);
 
   process.stdout.write(out);
 }
@@ -915,9 +933,9 @@ function handleInput(chunk) {
       if (exportMode) { renderSettings(); return; }
       const dir = chunk[2];
       if (!settingsField) {
-        if (dir === 0x42 || dir === 0x41) { // any arrow → select the setting
-          settingsField = 'max_songs';
-          settingsValue = String(maxSongsBetweenBand);
+        if (dir === 0x41 || dir === 0x42) { // up/down — select setting
+          if (!settingsCursor) settingsCursor = 'max_songs';
+          else settingsCursor = settingsCursor === 'max_songs' ? 'bumper_vol' : 'max_songs';
           renderSettings();
         }
       }
@@ -951,17 +969,34 @@ function handleInput(chunk) {
       }
       if (ch === 13) {
         if (!settingsField) {
-          settingsField = 'max_songs';
-          settingsValue = String(maxSongsBetweenBand);
+          // Enter on a setting — start editing it
+          settingsField = settingsCursor;
+          if (settingsCursor === 'max_songs') settingsValue = String(maxSongsBetweenBand);
+          else if (settingsCursor === 'bumper_vol') settingsValue = String(bumperVolume);
+          else if (settingsCursor === 'karaoke') {
+            // Toggle karaoke immediately
+            doAction('toggle-karaoke');
+            renderSettings();
+            return;
+          }
           renderSettings();
         } else {
-          const val = parseInt(settingsValue);
-          if (!isNaN(val) && val >= 0) {
-            settingsMode = false;
-            settingsField = null;
-            settingsValue = '';
-            render();
-            doAction('update-settings', { max_songs_between_band: val }).then(() => render());
+          // Save edited value
+          if (settingsField === 'max_songs') {
+            const val = parseInt(settingsValue);
+            if (!isNaN(val) && val >= 0) {
+              settingsMode = false;
+              settingsField = null; settingsValue = ''; settingsCursor = 'max_songs';
+              render();
+              doAction('update-settings', { max_songs_between_band: val }).then(() => render());
+            }
+          } else if (settingsField === 'bumper_vol') {
+            const val = parseInt(settingsValue);
+            if (!isNaN(val) && val >= 5 && val <= 100) {
+              adjustBumperVolume(val);
+              settingsField = null; settingsValue = '';
+              renderSettings();
+            }
           }
         }
         return;
@@ -1013,16 +1048,6 @@ function handleInput(chunk) {
         if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode) {
           bumperPost('stop').then(() => refreshBumper());
           log('Bumper: stopped immediately');
-        }
-        break;
-      case 0x5B: // [ — bumper vol down
-        if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode) {
-          bumperPost('vol-down').then(() => refreshBumper());
-        }
-        break;
-      case 0x5D: // ] — bumper vol up
-        if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode) {
-          bumperPost('vol-up').then(() => refreshBumper());
         }
         break;
       case 0x6D: // m — toggle bumper (play / graceful stop)
