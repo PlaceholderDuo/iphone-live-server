@@ -71,7 +71,16 @@
       "ip": "127.0.0.1"
     }
   ],
-  "band_queue": [],
+  "band_queue": [
+    {
+      "slug": "(Sittin on) The dock of the bay",
+      "title": "(Sittin on) The dock of the bay",
+      "artist": "Otis Redding ",
+      "key": "G",
+      "bpm": 120,
+      "timestamp": 1783975268312
+    }
+  ],
   "current_index": -1,
   "status": "stopped",
   "current_song": null,

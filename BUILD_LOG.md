@@ -670,3 +670,80 @@ IP addresses are captured at singer signup time via `req.ip` and stored on each 
 - **[2026-07-13]** Kick message changed from aggressive to polite: `"Thanks for singing! Have a great night!"` — kicked singers just think they got their one song. No drama.
 - **[2026-07-13]** `start-show` now defaults to `connect` mode (SETUP), not `live`. Press `Shift+S` in TUI to go LIVE. Prevents accidental Dell kiosk activation.
 - **[2026-07-13]** TUI shows prominent yellow `[Shift+S] Start Show to go LIVE` banner in setup mode. `SETUP` badge replaces `CONNECTED`.
+
+---
+
+## Session 9: TUI Polish — Overlays, Import Visibility, Setlist View — 2026-07-13
+
+`#music #iphoneliveserver #tui #polish`
+
+### Problem
+
+1. **Overlay text bleeding**: Confirm dialogs, setlist picker, and settings overlay rendered on top of existing screen content without clearing first. Background TUI text showed through overlays.
+2. **Import "not working"**: Import API worked correctly but the TUI had no panel displaying `main_queue` — users couldn't see imported setlists. Songs populated in the queue but were invisible.
+3. **Export auto-named**: No prompt for setlist name — just date-stamped auto-name.
+4. **Stale duplicate E handler**: Two `case 0x45` handlers existed in the switch.
+
+### Fixes
+
+#### 1. Clear Screen on Overlays
+
+All overlay renders (`renderConfirm`, `renderSetlistPicker`, `renderSettings`) now start with `HIDE + CLS` instead of just `HIDE`. `CLS` sends the ANSI clear-screen escape before drawing the overlay box.
+
+#### 2. Setlist View in Queue Panel
+
+Tab now cycles through **3 views**: Singers → Band Queue → Setlist → loop.
+
+| View | Shows | Cursor | Actions |
+|------|-------|--------|---------|
+| Singers | `singer_queue` | `singerCursor` | Promote, Kick, Remove, Round, Add Singer |
+| Band Queue | `band_queue` | `bandCursor` | Remove, Add Band |
+| Setlist | `main_queue` | `mainQueueCursor` | Remove, Add Song |
+
+Setlist view shows title, artist, key, and singer name (for promoted entries). Each view has its own independent cursor.
+
+#### 3. Export Name Prompt
+
+Pressing `E` now opens a name input overlay: type the setlist name, Enter to export. Shows song count being exported.
+
+#### 4. Import Error Reporting
+
+`POST /api/setlists/import` now returns `failed: []` array listing slugs that didn't match a song in the library. TUI logs: `"Setlist loaded: Test (4 songs, 2 not found)"` with failed slugs listed.
+
+#### 5. Removed Stale Code
+
+Removed duplicate `case 0x45` handler that auto-exported without prompting. Cleaned up `I` key handler (was also triggering on lowercase `i`).
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `scripts/tui.js` | +Setlist view, +CLS on all overlays, +export name prompt, removed stale E handler, +mainQueueCursor, 3-state Tab cycling |
+| `server/api/setlists.js` | Import returns `failed` array + `total` count |
+| `data/setlists/*.txt` | Test setlists for verification |
+
+### TUI Keyboard Reference (Final)
+
+| Key | Context | Action |
+|-----|---------|--------|
+| `←` `→` | Always | Switch panel focus (REAPER / Queue) |
+| `Tab` | Queue focused | Cycle views: Singers → Band → Setlist |
+| `↑` `↓` | Queue focused | Navigate current view |
+| `a` | Singers | Search song → type name → add to karaoke queue |
+| `a` | Band | Search → add to band queue |
+| `a` | Setlist | Search → add to main queue |
+| `p` | Singers | Promote singer to main queue |
+| `B` | Singers | Kick/ban singer (confirm) |
+| `x` | Singers | Remove singer (confirm) |
+| `x` | Band/Setlist | Remove song (instant) |
+| `c` | Singers | Clear round + auto-promote band song |
+| `E` | Always | Export setlist (prompt for name) |
+| `I` | Always | Import setlist (picker) |
+| `?` | Always | Settings (max songs between band) |
+| `Shift+K` | Always | Toggle karaoke ON/OFF |
+| `Shift+S` | SETUP mode | Start the show (go LIVE) |
+| `w` | Always | WiFi info overlay |
+| `e` | Always | Sync external submissions |
+| `o` | Always | Toggle online/offline |
+| `r` | Always | Restart server |
+| `q` | Always | Quit (stops everything) |
