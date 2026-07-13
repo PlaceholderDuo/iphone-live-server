@@ -49,24 +49,37 @@ async function api(url, opts) {
 }
 
 async function load() {
-  // Show singer queue
   const sq = await api('/api/singer/queue');
   if (!sq) return;
   const el = document.getElementById('bandQueueList');
   const q = sq.queue || [];
-  document.getElementById('bandStatus').textContent = q.length + ' singers in queue (Round ' + sq.round + ')';
-  if (q.length === 0) { el.innerHTML = '<div class="empty-state">No singers waiting — share the singer QR code!</div>'; return; }
-  el.innerHTML = q.map((item, i) => `
-    <div class="queue-item">
-      <div class="flex" style="flex:1">
-        <span class="queue-pos">${i+1}.</span>
-        <div>
-          <div style="font-weight:600">${esc(item.singer)}</div>
-          <div class="text-sm">${esc(item.song_title)} — ${esc(item.song_artist)}</div>
+  let etaStr = sq.eta_minutes > 0 ? ' (~' + sq.eta_minutes + ' min)' : '';
+  document.getElementById('bandStatus').textContent = q.length + ' singers in queue (Round ' + sq.round + ')' + etaStr;
+
+  let html = '';
+  if (sq.band_playing) {
+    html += '<div class="placeholder-duo">' +
+      '<div class="label">Now Playing — Placeholder Duo</div>' +
+      '<div style="font-size:18px;font-weight:700;color:var(--yellow);margin:4px 0">Band Song</div>' +
+      '<div class="text-sm" style="color:var(--yellow)">Singers coming up next!</div>' +
+      '</div>';
+  }
+  if (q.length === 0 && !sq.band_playing) {
+    html += '<div class="empty-state">No singers waiting — share the singer QR code!</div>';
+  } else if (q.length > 0) {
+    html += q.map((item, i) => `
+      <div class="queue-item">
+        <div class="flex" style="flex:1">
+          <span class="queue-pos">${i+1}.</span>
+          <div>
+            <div style="font-weight:600">${esc(item.singer)}</div>
+            <div class="text-sm">${esc(item.song_title)} — ${esc(item.song_artist)}</div>
+          </div>
         </div>
       </div>
-    </div>
-  `).join('');
+    `).join('');
+  }
+  el.innerHTML = html;
 }
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }

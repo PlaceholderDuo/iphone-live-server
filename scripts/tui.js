@@ -147,6 +147,10 @@ async function loadSongCache() {
   if (r && r.songs) songCache = r.songs;
 }
 
+function getSongInfo(slug) {
+  return songCache.find(s => s.slug === slug);
+}
+
 async function checkServer() {
   const health = await apiGet('/api/health');
   const wasRunning = serverRunning;
@@ -244,8 +248,14 @@ async function doAction(action, arg) {
     case 'remove-band':
       if (arg !== undefined) result = await apiPost('/api/band-queue/item/' + arg, {}, 'DELETE');
       break;
+    case 'play-now':
+      if (arg !== undefined) result = await apiPost('/api/band-queue/promote', { index: arg });
+      break;
+    case 'clear-round-confirm':
+      result = await apiPost('/api/singer/clear-round');
+      break;
     case 'export-setlist':
-      if (arg) result = await apiPost('/api/setlists/export', { name: arg, songs: (queueState.main_queue || []).map(s => ({ slug: s.slug })) });
+      if (arg) result = await apiPost('/api/setlists/export', { name: arg, songs: (queueState.band_queue || []).map(s => ({ slug: s.slug })) });
       break;
     case 'import-setlist':
       if (arg) result = await apiPost('/api/setlists/import', { name: arg, mode: 'replace' });
@@ -281,10 +291,12 @@ async function doAction(action, arg) {
       else if (action === 'stop') log('Stop');
       else if (action === 'start') log(`Started: ${result.song?.title || '?'}`);
       else if (action === 'clear') log('Queue cleared');
-      else if (action === 'clear-round') log(`Round ${result.round || '?'} cleared`);
+      else if (action === 'clear-round-confirm') log(`Round ${result?.round || '?'} cleared`);
       else if (action === 'add') {
         const song = songCache.find(s => s.slug === arg);
-        log(`Added: ${song?.title || arg}`);
+        const warn = result?.duplicate ? ' (DUPLICATE!)' : '';
+        log(`Added: ${song?.title || arg}${warn}`);
+        if (result?.duplicate) log(`  Warning: "${result.title}" is already in the queue`);
       }
       else if (action === 'add-singer') {
         const song = songCache.find(s => s.slug === arg);
@@ -362,7 +374,7 @@ function render() {
   out += ESC + '1;1H' + BG_ORANGE + ' '.repeat(w) + RESET;
   out += ESC + '1;2H' + WHITE + BOLD + ' ♪ LIVE SHOW SERVER  ' + RESET + DIM + WHITE + 'v1.0' + RESET;
   const modeBadge = showMode === 'live' ? (GREEN + 'LIVE' + RESET) : (YELLOW + 'SETUP' + RESET);
-  const focusLabel = focus === 'queue' ? (queueView === 'singers' ? 'SINGERS' : queueView === 'band' ? 'BAND' : 'SETLIST') : 'REAPER';
+  const focusLabel = focus === 'queue' ? (queueView === 'singers' ? 'SINGERS' : 'SETLIST') : 'REAPER';
   const focusTag = ' [' + CYAN + focusLabel + RESET + ']';
   const onlineTag = externalStatus.online_detected ? (GREEN + ' ONLINE' + RESET) : (YELLOW + ' OFFLINE' + RESET);
   out += ESC + '1;' + (w - 50) + 'H' + '[' + modeBadge + ']' + focusTag + '  ' + onlineTag + '  ' + icon + ' ' + (serverRunning ? 'RUNNING' : 'STOPPED') + ' :' + SERVER_PORT + RESET;
@@ -396,36 +408,48 @@ function render() {
   const qr = lw + 2;
   const qHighlight = focus === 'queue';
   const isSingers = queueView === 'singers';
-  const isBand = queueView === 'band';
-  const panelQueue = isSingers ? (singerQueue.queue || []) : isBand ? (queueState.band_queue || []) : (queueState.main_queue || []);
-  const panelTitle = isSingers ? `SINGERS (${singerQueue.queue?.length || 0})` : isBand ? `BAND QUEUE (${(queueState.band_queue || []).length})` : `SETLIST (${(queueState.main_queue || []).length})`;
+  const panelQueue = isSingers ? (singerQueue.queue || []) : (queueState.band_queue || []);
+  const panelTitle = isSingers ? `SINGERS (${singerQueue.queue?.length || 0})` : `SETLIST (${(queueState.band_queue || []).length})`;
   out += drawBox(ct, qr, rw, ch, panelTitle, qHighlight);
   const mv = ch - 2;
-  const cursorIdx = isSingers ? singerCursor : isBand ? bandCursor : mainQueueCursor;
+  const cursorIdx = isSingers ? singerCursor : bandCursor;
   let scrollStart = qHighlight ? Math.max(0, Math.min(cursorIdx - Math.floor(mv / 2), Math.max(0, panelQueue.length - mv))) : 0;
   scrollStart = Math.max(0, Math.min(scrollStart, Math.max(0, panelQueue.length - mv)));
 
+  const currentSlug = queueState.current_song?.slug;
   for (let i = 0; i < mv; i++) {
     const idx = scrollStart + i;
     if (idx >= panelQueue.length) { out += drawText(ct + 1 + i, qr + 2, ' '.repeat(rw - 4)); continue; }
     const item = panelQueue[idx];
     const isCursor = qHighlight && idx === cursorIdx;
+    const isNowPlaying = !isSingers && currentSlug && item.slug === currentSlug;
     const n = (idx + 1 + '').padStart(2);
-    const cursorMark = isCursor ? (INV + ' ' + RESET) : ' ';
-    const style = isCursor ? (INV + BOLD) : DIM;
+    const cursorMark = isCursor ? (INV + ' ' + RESET) : isNowPlaying ? (GREEN + ' ▶' + RESET) : ' ';
+    const style = isCursor ? (INV + BOLD) : isNowPlaying ? (GREEN + BOLD) : DIM;
     if (isSingers) {
       const name = (item.singer || '?').substring(0, rw - 20);
       const song = ((item.song_title || '?') + ' — ' + (item.song_artist || '')).substring(0, rw - 10);
       out += drawText(ct + 1 + i, qr + 1, style + cursorMark + ' ' + n + '. ' + name + '  ' + DIM + song + RESET);
     } else {
-      const title = (item.title || '?').substring(0, rw - 12);
-      const artist = (item.artist || '').substring(0, rw - 12);
-      const extra = isBand ? '' : (item.singer ? '  ' + DIM + item.singer + RESET : '');
-      out += drawText(ct + 1 + i, qr + 1, style + cursorMark + ' ' + n + '. ' + title + '  ' + DIM + artist + (item.key ? ' [' + item.key + ']' : '') + extra + RESET);
+      const title = (item.title || '?').substring(0, rw - 6);
+      const artist = (item.artist || '').substring(0, rw - 8);
+      const keyInfo = item.key ? ' [' + GREEN + item.key + RESET + ']' : '';
+      let notes = '';
+      if (isCursor) {
+        const info = getSongInfo(item.slug);
+        if (info) {
+          const parts = [];
+          if (info.tuning) parts.push(info.tuning);
+          if (info.capo) parts.push('capo ' + info.capo);
+          if (info.difficulty) parts.push(info.difficulty);
+          if (parts.length) notes = '  ' + DIM + parts.join(' · ') + RESET;
+        }
+      }
+      out += drawText(ct + 1 + i, qr + 1, style + cursorMark + ' ' + n + '. ' + title + '  ' + DIM + artist + keyInfo + RESET + notes);
     }
   }
   if (panelQueue.length === 0) {
-    const msg = isSingers ? 'No singers waiting' : isBand ? 'No band songs queued' : 'No songs in setlist';
+    const msg = isSingers ? 'No singers waiting' : 'No songs in setlist';
     out += drawText(ct + 3, qr + 2, DIM + msg + RESET);
   }
 
@@ -444,7 +468,7 @@ function render() {
     : (DIM + 'Dell not connected' + RESET);
   const phoneClients = connectedClients.filter(c => (c.ip || '').startsWith('192.')).length;
   out += drawText(st + 1, 3, WHITE +
-    `Singers ${WHITE}${BOLD}${sc}${RESET}${WHITE}  Band ${WHITE}${BOLD}${bc}${RESET}${WHITE}  Round ${singerQueue.round || 1} (${promoteCount}/${maxSongsBetweenBand}) ${DIM}·${WHITE} ` +
+    `Singers ${WHITE}${BOLD}${sc}${RESET}${WHITE}  Setlist ${WHITE}${BOLD}${bc}${RESET}${WHITE}  Round ${singerQueue.round || 1} (${promoteCount}/${maxSongsBetweenBand})  ETA ${WHITE}${BOLD}${queueState.eta_minutes || 0}m${RESET}${WHITE} ${DIM}·${WHITE} ` +
     `Ext ${WHITE}${BOLD}${extPend}${RESET}${WHITE} ${syncLabel} ${DIM}·${WHITE} Karaoke ${karaokeIcon}${WHITE} ${DIM}·${WHITE} ${modeLabel}${WHITE} ${DIM}·${WHITE} ${dellStr}` +
     (reaperState.currentSong ? ` ${DIM}·${WHITE} ${GREEN + reaperState.currentSong.substring(0,20) + RESET}` : '') + RESET);
   const boxHost = lanIP || process.env.SHOW_IP || 'localhost';
@@ -468,14 +492,12 @@ function render() {
   out += drawBox(at, 1, w - 1, ah, 'ACTIONS');
   const karaokeLabel = karaokeEnabled ? (RED + '[shift+k]' + RESET + ' Pause') : (GREEN + '[shift+k]' + RESET + ' Karaoke ON');
   const netLabel = externalStatus.online_detected ? (CYAN + '[o]' + RESET + ' Offline') : (YELLOW + '[o]' + RESET + ' Online');
-  const navKeys = `${BOLD}[←→]${RESET} Panel  ${focus === 'queue' ? BOLD + '[Tab] ' + (queueView === 'singers' ? 'Band Q' : queueView === 'band' ? 'Setlist' : 'Singers') + RESET : ''}`;
+  const navKeys = `${BOLD}[←→]${RESET} Panel  ${focus === 'queue' ? BOLD + '[Tab] ' + (queueView === 'singers' ? 'Setlist' : 'Singers') + RESET : ''}`;
   const queueKeys = focus === 'queue'
     ? (queueView === 'singers'
         ? `${BOLD}[p]${RESET} Promote  ${BOLD}[x]${RESET} Remove  ${BOLD}[B]${RESET} Kick  ${BOLD}[c]${RESET} Round  ${BOLD}[a]${RESET} Add Singer`
-        : queueView === 'band'
-        ? `${BOLD}[x]${RESET} Remove  ${BOLD}[a]${RESET} Add Band`
-        : `${BOLD}[x]${RESET} Remove  ${BOLD}[a]${RESET} Add Song`)
-    : `${BOLD}[a]${RESET} Search+Add`;
+        : `${BOLD}[Enter]${RESET} Play Now  ${BOLD}[x]${RESET} Remove  ${BOLD}[a]${RESET} Add Song`)
+    : `  ${BOLD}[n]${RESET} Next  ${BOLD}[b]${RESET} Prev  ${BOLD}[Space]${RESET} Play  ${BOLD}[a]${RESET} Add`;
   const row1 = `${navKeys}  ${queueKeys}  ${BOLD}[E]${RESET} Export  ${BOLD}[I]${RESET} Import  ${BOLD}[?]${RESET} Settings  ${BOLD}[q]${RESET} Quit${showMode === 'connected' ? `  ${BOLD}[Shift+S]${RESET} Start Show` : ''}`;
   const row2 = `${karaokeLabel}  ${netLabel}  ${BOLD}[e]${RESET} Sync  ${BOLD}[w]${RESET} WiFi  ${BOLD}[r]${RESET} Restart`;
   out += drawText(at + 1, 3, row1);
@@ -798,6 +820,8 @@ function handleInput(chunk) {
             const name = q[confirmRemoveIndex].singer;
             apiPost('/api/singer/kick', { singer: name });
           }
+        } else if (action === 'clear-round') {
+          doAction('clear-round-confirm');
         }
         confirmMode = false;
         confirmItem = null;
@@ -913,18 +937,14 @@ function handleInput(chunk) {
     // ↑ / ↓ in queue focus — navigate the displayed queue
     if (focus === 'queue' && (dir === 0x41 || dir === 0x42)) {
       const isSingers = queueView === 'singers';
-      const isBand = queueView === 'band';
-      const q = isSingers ? (singerQueue.queue || []) : isBand ? (queueState.band_queue || []) : (queueState.main_queue || []);
+      const q = isSingers ? (singerQueue.queue || []) : (queueState.band_queue || []);
       if (q.length === 0) return;
       if (isSingers) {
         if (dir === 0x41) singerCursor = Math.max(0, singerCursor - 1);
         else singerCursor = Math.min(q.length - 1, singerCursor + 1);
-      } else if (isBand) {
+      } else {
         if (dir === 0x41) bandCursor = Math.max(0, bandCursor - 1);
         else bandCursor = Math.min(q.length - 1, bandCursor + 1);
-      } else {
-        if (dir === 0x41) mainQueueCursor = Math.max(0, mainQueueCursor - 1);
-        else mainQueueCursor = Math.min(q.length - 1, mainQueueCursor + 1);
       }
       render();
       return;
@@ -956,11 +976,9 @@ function handleInput(chunk) {
           enterSettingsMode();
         }
         break;
-      case 0x09: // Tab — toggle queue view (singers → band → setlist → singers)
+      case 0x09: // Tab — toggle queue view (singers ↔ setlist)
         if (focus === 'queue') {
-          if (queueView === 'singers') queueView = 'band';
-          else if (queueView === 'band') queueView = 'setlist';
-          else queueView = 'singers';
+          queueView = queueView === 'singers' ? 'setlist' : 'singers';
           render();
         }
         break;
@@ -999,30 +1017,51 @@ function handleInput(chunk) {
               confirmAction = 'remove-singer';
               renderConfirm();
             }
-          } else if (queueView === 'band') {
-            const bq = queueState.band_queue || [];
-            if (bq.length > 0 && bandCursor >= 0 && bandCursor < bq.length) {
-              doAction('remove-band', bandCursor);
-              if (bandCursor >= bq.length - 1 && bq.length > 1) bandCursor = bq.length - 2;
-            }
           } else {
-            // setlist view — remove from main_queue
-            const mq = queueState.main_queue || [];
-            if (mq.length > 0 && mainQueueCursor >= 0 && mainQueueCursor < mq.length) {
-              doAction('remove', mainQueueCursor);
-              if (mainQueueCursor >= mq.length - 1 && mq.length > 1) mainQueueCursor = mq.length - 2;
+            const sl = queueState.band_queue || [];
+            if (sl.length > 0 && bandCursor >= 0 && bandCursor < sl.length) {
+              doAction('remove-band', bandCursor);
+              if (bandCursor >= sl.length - 1 && sl.length > 1) bandCursor = sl.length - 2;
             }
           }
         }
         break;
-      case 0x63: case 0x43: // c/C — clear round (only in singers mode)
-        if (focus === 'queue' && queueView === 'singers') doAction('clear-round');
+      case 0x6E: // n — load next
+        if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode)
+          doAction('next');
+        break;
+      case 0x62: // b — load prev (lowercase b; B is kick in singers)
+        if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode)
+          doAction('prev');
+        break;
+      case 0x20: // Space — play/stop
+        if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode) {
+          if (queueState.status === 'playing') doAction('stop');
+          else if (queueState.current_song) doAction('play');
+          else doAction('start');
+        }
+        break;
+      case 0x0D: // Enter — play on the fly (setlist view only)
+        if (focus === 'queue' && queueView !== 'singers' && !inputMode && !confirmMode && !setlistMode && !settingsMode) {
+          const sl = queueState.band_queue || [];
+          if (sl.length > 0 && bandCursor >= 0 && bandCursor < sl.length) {
+            doAction('play-now', bandCursor);
+          }
+        }
+        break;
+      case 0x63: case 0x43: // c/C — clear round (singers only, with confirm)
+        if (focus === 'queue' && queueView === 'singers') {
+          confirmMode = true;
+          confirmItem = { title: `Clear Round ${singerQueue.round} (${(singerQueue.queue || []).length} singers)` };
+          confirmAction = 'clear-round';
+          renderConfirm();
+        }
         break;
       case 0x61: case 0x41: // a/A — search + add
-        if (focus === 'queue' && queueView === 'band') {
-          enterSearchMode('add-band');
-        } else if (focus === 'queue' && queueView === 'singers') {
+        if (focus === 'queue' && queueView === 'singers') {
           enterSearchMode('add-singer');
+        } else if (focus === 'queue') {
+          enterSearchMode('add-band');
         } else {
           enterSearchMode('add');
         }

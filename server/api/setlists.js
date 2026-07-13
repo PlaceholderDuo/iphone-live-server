@@ -96,15 +96,13 @@ function setlistRoutes(app) {
       }
     }
     if (mode === 'replace') {
-      q.main_queue = added;
-      q.current_index = -1;
-      q.current_song = null;
-      q.status = 'stopped';
+      q.band_queue = added;
     } else {
-      q.main_queue.push(...added);
+      if (!q.band_queue) q.band_queue = [];
+      q.band_queue.push(...added);
     }
     saveQueue(q);
-    res.json({ ok: true, file: result.file, added: added.length, total: result.slugs.length, failed, queue: q.main_queue });
+    res.json({ ok: true, file: result.file, added: added.length, total: result.slugs.length, failed, band_queue: q.band_queue });
   });
 
   app.delete('/api/setlists/:name', (req, res) => {

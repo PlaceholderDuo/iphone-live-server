@@ -6,7 +6,7 @@
       "artist": "Free",
       "key": "A",
       "bpm": 120,
-      "timestamp": 1783975224161
+      "timestamp": 1783975298393
     },
     {
       "slug": "Brown Eyed Girl",
@@ -14,7 +14,7 @@
       "artist": "Van Morrison",
       "key": "G",
       "bpm": 120,
-      "timestamp": 1783975224162
+      "timestamp": 1783975298395
     },
     {
       "slug": "American Girl",
@@ -22,7 +22,7 @@
       "artist": "Tom Petty and The Heartbreakers",
       "key": "",
       "bpm": 120,
-      "timestamp": 1783975224163
+      "timestamp": 1783975298397
     },
     {
       "slug": "Proud Mary",
@@ -30,7 +30,7 @@
       "artist": "Creedence Clearwater Revival",
       "key": "",
       "bpm": 120,
-      "timestamp": 1783975224165
+      "timestamp": 1783975298399
     },
     {
       "slug": "A Boy Named Sue",
@@ -38,7 +38,26 @@
       "artist": "Johnny Cash",
       "key": "Bb",
       "bpm": 120,
-      "timestamp": 1783975224166
+      "timestamp": 1783975298400
+    },
+    {
+      "slug": "American Girl",
+      "title": "American Girl",
+      "artist": "Tom Petty and The Heartbreakers",
+      "key": "",
+      "bpm": 120,
+      "singer": "Placeholder Duo",
+      "band_song": true,
+      "timestamp": 1783975948161
+    },
+    {
+      "slug": "All Right Now",
+      "title": "All Right Now",
+      "artist": "Free",
+      "key": "A",
+      "bpm": 120,
+      "timestamp": 1783975948260,
+      "duplicate": true
     }
   ],
   "singer_queue": [
@@ -69,16 +88,50 @@
       "timestamp": 1783974014099,
       "round": 1,
       "ip": "127.0.0.1"
+    },
+    {
+      "id": "mrjp7vgdx8wx",
+      "singer": "Test",
+      "song_slug": "All Right Now",
+      "song_title": "All Right Now",
+      "song_artist": "Free",
+      "timestamp": 1783975948285,
+      "round": 1,
+      "ip": "127.0.0.1"
     }
   ],
   "band_queue": [
     {
-      "slug": "(Sittin on) The dock of the bay",
-      "title": "(Sittin on) The dock of the bay",
-      "artist": "Otis Redding ",
+      "slug": "All Right Now",
+      "title": "All Right Now",
+      "artist": "Free",
+      "key": "A",
+      "bpm": 120,
+      "timestamp": 1783975948088
+    },
+    {
+      "slug": "Brown Eyed Girl",
+      "title": "Brown Eyed Girl",
+      "artist": "Van Morrison",
       "key": "G",
       "bpm": 120,
-      "timestamp": 1783975268312
+      "timestamp": 1783975948089
+    },
+    {
+      "slug": "Proud Mary",
+      "title": "PROUD MARY",
+      "artist": "Creedence Clearwater Revival",
+      "key": "",
+      "bpm": 120,
+      "timestamp": 1783975948092
+    },
+    {
+      "slug": "A Boy Named Sue",
+      "title": "A Boy Named Sue",
+      "artist": "Johnny Cash",
+      "key": "Bb",
+      "bpm": 120,
+      "timestamp": 1783975948093
     }
   ],
   "current_index": -1,

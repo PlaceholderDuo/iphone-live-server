@@ -54,6 +54,8 @@ function promoteBandSong(q) {
 function queueRoutes(app) {
   app.get('/api/queue', (req, res) => {
     const q = loadQueue();
+    const MINUTES_PER_SONG = 5; // ~4 min song + 1 min transition
+    const remaining = q.main_queue.length - Math.max(0, q.current_index);
     res.json({
       main_queue: q.main_queue,
       band_queue: q.band_queue || [],
@@ -62,7 +64,9 @@ function queueRoutes(app) {
       current_song: q.current_song,
       has_next: q.current_index < q.main_queue.length - 1,
       has_prev: q.current_index > 0,
-      is_at_end: q.main_queue.length > 0 && q.current_index >= q.main_queue.length - 1
+      is_at_end: q.main_queue.length > 0 && q.current_index >= q.main_queue.length - 1,
+      eta_minutes: Math.max(0, remaining * MINUTES_PER_SONG),
+      singer_eta_minutes: (q.singer_queue || []).length * MINUTES_PER_SONG
     });
   });
 
@@ -72,16 +76,19 @@ function queueRoutes(app) {
     const info = songsApi.getSong(slug);
     if (!info || !info.meta) return res.status(400).json({ error: 'Song not found' });
     const q = loadQueue();
+    const title = info.meta.title || slug;
+    const exists = q.main_queue.find(e => e.slug === slug);
     q.main_queue.push({
       slug,
-      title: info.meta.title || slug,
+      title,
       artist: info.meta.artist || 'Unknown',
       key: info.meta.key || '',
       bpm: info.meta.bpm || 0,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      duplicate: !!exists
     });
     saveQueue(q);
-    res.json({ ok: true, queue: q.main_queue });
+    res.json({ ok: true, queue: q.main_queue, duplicate: !!exists, title });
   });
 
   app.post('/api/queue/add-multiple', (req, res) => {
@@ -220,10 +227,13 @@ function queueRoutes(app) {
   // Singer queue endpoints
   app.get('/api/singer/queue', (req, res) => {
     const q = loadQueue();
+    const MINUTES_PER_SONG = 5;
     res.json({
       queue: q.singer_queue,
       round: q.round,
-      promote_count: q.promote_count || 0
+      promote_count: q.promote_count || 0,
+      eta_minutes: q.singer_queue.length * MINUTES_PER_SONG,
+      band_playing: q.current_song?.band_song || false
     });
   });
 
@@ -458,6 +468,32 @@ function queueRoutes(app) {
     q.band_queue.splice(idx, 1);
     saveQueue(q);
     res.json({ ok: true, band_queue: q.band_queue });
+  });
+
+  app.post('/api/band-queue/promote', (req, res) => {
+    const { index } = req.body || {};
+    const idx = parseInt(index);
+    const q = loadQueue();
+    if (!q.band_queue) q.band_queue = [];
+    if (isNaN(idx) || idx < 0 || idx >= q.band_queue.length) return res.status(400).json({ error: 'Invalid index' });
+    const song = q.band_queue.splice(idx, 1)[0];
+    const entry = {
+      slug: song.slug,
+      title: song.title,
+      artist: song.artist,
+      key: song.key || '',
+      bpm: song.bpm || 0,
+      singer: 'Placeholder Duo',
+      band_song: true,
+      timestamp: Date.now()
+    };
+    // Insert after current song, or at end
+    const insertAt = q.current_index >= 0 && q.current_index < q.main_queue.length - 1
+      ? q.current_index + 1
+      : q.main_queue.length;
+    q.main_queue.splice(insertAt, 0, entry);
+    saveQueue(q);
+    res.json({ ok: true, promoted: song, queue: q.main_queue });
   });
 
   app.post('/api/band-queue/clear', (req, res) => {

@@ -149,6 +149,7 @@
       <span id="queueSize" class="text-sm">0 singers</span>
     </div>
     <div id="singerQueueList"></div>
+    <div id="queueEta" class="text-sm" style="text-align:center;margin-top:8px;color:var(--text2);display:none"></div>
   </div>
 
   <div class="card" style="text-align:center;margin-top:8px">
@@ -480,8 +481,23 @@ async function loadSingerQueue() {
   if (!r) return;
   const el = document.getElementById('singerQueueList');
   document.getElementById('queueSize').textContent = r.queue.length + ' singers';
-  if (r.queue.length === 0) { el.innerHTML = '<div class="song-item" style="cursor:default;justify-content:center;color:var(--text2);padding:16px">No one in queue yet</div>'; return; }
-  el.innerHTML = r.queue.map((e, i) => {
+  const etaEl = document.getElementById('queueEta');
+  if (r.eta_minutes > 0) {
+    etaEl.style.display = 'block';
+    etaEl.textContent = '~' + r.eta_minutes + ' min of singers waiting';
+  } else {
+    etaEl.style.display = 'none';
+  }
+  // Band playing indicator
+  if (r.band_playing) {
+    el.innerHTML = '<div class="song-item" style="background:var(--surface2);border-left:3px solid var(--yellow);cursor:default;padding:12px">' +
+      '<div><div style="font-weight:600;color:var(--yellow)">Placeholder Duo</div>' +
+      '<div class="text-sm" style="color:var(--yellow)">Band is playing — singers coming up next!</div></div>' +
+      '<span class="badge" style="background:var(--yellow);color:#000">♫</span></div>';
+  } else if (r.queue.length === 0) {
+    el.innerHTML = '<div class="song-item" style="cursor:default;justify-content:center;color:var(--text2);padding:16px">No one in queue yet</div>';
+  } else {
+    el.innerHTML = r.queue.map((e, i) => {
     const isMine = singerName && e.singer === singerName;
     return `<div class="singer-entry${isMine?' mine':''}" data-id="${e.id}" onclick="${isMine?`openQueueEntry('${e.id}',${i})`:'return'}">
       <div><div class="singer-name">${esc(e.singer)}${isMine?' <span class="tag tag-accent">you</span>':''}</div><div class="text-sm">${esc(e.song_title)} — ${esc(e.song_artist)}</div></div>
