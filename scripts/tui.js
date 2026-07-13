@@ -934,8 +934,10 @@ function handleInput(chunk) {
       const dir = chunk[2];
       if (!settingsField) {
         if (dir === 0x41 || dir === 0x42) { // up/down — select setting
-          if (!settingsCursor) settingsCursor = 'max_songs';
-          else settingsCursor = settingsCursor === 'max_songs' ? 'bumper_vol' : 'max_songs';
+          const order = ['max_songs', 'bumper_vol', 'karaoke'];
+          const idx = order.indexOf(settingsCursor);
+          if (dir === 0x41) settingsCursor = order[Math.max(0, idx - 1)]; // up
+          else settingsCursor = order[Math.min(order.length - 1, idx + 1)]; // down
           renderSettings();
         }
       }
