@@ -69,6 +69,7 @@ let maxSongsBetweenBand = 8;
 let promoteCount = 0;
 let bumperPlaying = false;
 let bumperTrack = '';
+let bumperVolume = 20;
 let wifiSSID = '';
 let wifiPassword = '';
 let lanIP = '127.0.0.1';
@@ -225,7 +226,7 @@ async function refreshBumper() {
       let data = '';
       res.on('data', c => data += c);
       res.on('end', () => {
-        try { const s = JSON.parse(data); bumperPlaying = s.playing || false; bumperTrack = s.current || ''; } catch {}
+        try { const s = JSON.parse(data); bumperPlaying = s.playing || false; bumperTrack = s.current || ''; bumperVolume = s.volume || 20; } catch {}
         resolve();
       });
     });
@@ -236,7 +237,7 @@ async function refreshBumper() {
 
 function bumperPost(action) {
   return new Promise((resolve) => {
-    const path = action === 'stop' ? '/bumper/api/stop' : action === 'stop-graceful' ? '/bumper/api/stop-graceful' : '/bumper/api/play';
+    const path = action === 'stop' ? '/bumper/api/stop' : action === 'stop-graceful' ? '/bumper/api/stop-graceful' : action === 'vol-up' ? '/bumper/api/volume/up' : action === 'vol-down' ? '/bumper/api/volume/down' : '/bumper/api/play';
     const data = JSON.stringify({});
     const opts = {
       hostname: 'localhost', port: 3000, path,
@@ -509,7 +510,7 @@ function render() {
     `Singers ${WHITE}${BOLD}${sc}${RESET}${WHITE}  Setlist ${WHITE}${BOLD}${bc}${RESET}${WHITE}  Round ${singerQueue.round || 1} (${promoteCount}/${maxSongsBetweenBand})  ETA ${WHITE}${BOLD}${queueState.eta_minutes || 0}m${RESET}${WHITE} ${DIM}·${WHITE} ` +
     `Ext ${WHITE}${BOLD}${extPend}${RESET}${WHITE} ${syncLabel} ${DIM}·${WHITE} Karaoke ${karaokeIcon}${WHITE} ${DIM}·${WHITE} ${modeLabel}${WHITE} ${DIM}·${WHITE} ${dellStr}` +
     (reaperState.currentSong ? ` ${DIM}·${WHITE} ${GREEN + reaperState.currentSong.substring(0,20) + RESET}` : '') +
-    (bumperPlaying ? ` ${DIM}·${WHITE} ${YELLOW + '♫ Bumper' + RESET}` : '') + RESET);
+    (bumperPlaying ? ` ${DIM}·${WHITE} ${YELLOW + '♫ Bumper ' + bumperVolume + '%' + RESET}` : '') + RESET);
   const boxHost = lanIP || process.env.SHOW_IP || 'localhost';
 
   // URLs box
@@ -538,7 +539,7 @@ function render() {
         : `${BOLD}[Enter]${RESET} Play Now  ${BOLD}[x]${RESET} Remove  ${BOLD}[a]${RESET} Add Song`)
     : `  ${BOLD}[n]${RESET} Next  ${BOLD}[b]${RESET} Prev  ${BOLD}[Space]${RESET} Play  ${BOLD}[a]${RESET} Add`;
   const row1 = `${navKeys}  ${queueKeys}  ${BOLD}[E]${RESET} Export  ${BOLD}[I]${RESET} Import  ${BOLD}[?]${RESET} Settings  ${BOLD}[q]${RESET} Quit${showMode === 'connected' ? `  ${BOLD}[Shift+S]${RESET} Start Show` : ''}`;
-  const row2 = `${karaokeLabel}  ${netLabel}  ${BOLD}[e]${RESET} Sync  ${BOLD}[w]${RESET} WiFi  ${BOLD}[r]${RESET} Restart`;
+  const row2 = `${karaokeLabel}  ${netLabel}  ${BOLD}[m]${RESET} Bumper  ${BOLD}[ ]${RESET} Vol  ${BOLD}[e]${RESET} Sync  ${BOLD}[w]${RESET} WiFi  ${BOLD}[r]${RESET} Restart`;
   out += drawText(at + 1, 3, row1);
   out += drawText(at + 2, 3, row2);
 
@@ -1006,12 +1007,22 @@ function handleInput(chunk) {
 
   for (const ch of chunk) {
     switch (ch) {
-      case 0x71: case 0x51: stopServer(); process.stdout.write(SHOW); process.exit(0);
+      case 0x71: case 0x51: bumperPost('stop'); stopServer(); process.stdout.write(SHOW); process.exit(0);
       case 0x4B: doAction('toggle-karaoke'); break; // Shift+K only
       case 0x4D: // Shift+M — stop bumper immediately
         if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode) {
           bumperPost('stop').then(() => refreshBumper());
           log('Bumper: stopped immediately');
+        }
+        break;
+      case 0x5B: // [ — bumper vol down
+        if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode) {
+          bumperPost('vol-down').then(() => refreshBumper());
+        }
+        break;
+      case 0x5D: // ] — bumper vol up
+        if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode) {
+          bumperPost('vol-up').then(() => refreshBumper());
         }
         break;
       case 0x6D: // m — toggle bumper (play / graceful stop)
@@ -1021,7 +1032,7 @@ function handleInput(chunk) {
             log('Bumper: stopping after current track');
           } else {
             bumperPost('play').then(() => refreshBumper());
-            log('Bumper: started');
+            log(`Bumper: started (${bumperVolume}%)`);
           }
         }
         break;
