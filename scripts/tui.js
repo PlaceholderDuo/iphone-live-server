@@ -42,6 +42,7 @@ let queueView = 'singers';
 let singerCursor = 0;
 let bandCursor = 0;
 let inputMode = false;
+let inputPrompt = '';
 let confirmMode = false;
 let confirmItem = null;
 let confirmRemoveIndex = -1;
@@ -50,6 +51,10 @@ let inputBuffer = '';
 let searchResults = [];
 let searchCursor = 0;
 let searchDebounce = null;
+let searchTarget = 'add';
+let nameInputMode = false;
+let nameInputBuffer = '';
+let nameInputFor = null;
 let showWifiInfo = false;
 let wifiSSID = '';
 let wifiPassword = '';
@@ -207,6 +212,9 @@ async function doAction(action, arg) {
     case 'add-singer':
       if (arg) result = await apiPost('/api/singer/add', { singer: 'Band', song_slug: arg });
       break;
+    case 'add-singer-name':
+      if (arg && arg.name && arg.slug) result = await apiPost('/api/singer/add', { singer: arg.name, song_slug: arg.slug });
+      break;
     case 'add-band':
       if (arg) result = await apiPost('/api/band-queue/add', { slug: arg });
       break;
@@ -253,6 +261,10 @@ async function doAction(action, arg) {
         const song = songCache.find(s => s.slug === arg);
         log(`Singer add: ${song?.title || arg}`);
       }
+      else if (action === 'add-singer-name') {
+        const song = songCache.find(s => s.slug === arg.slug);
+        log(`Added singer: ${arg.name} — ${song?.title || arg.slug}`);
+      }
       else if (action === 'add-band') {
         const song = songCache.find(s => s.slug === arg);
         log(`Band queue: ${song?.title || arg}`);
@@ -295,7 +307,7 @@ function drawText(top, left, text) {
 }
 
 function render() {
-  if (inputMode) { renderSearch(); return; }
+  if (inputMode || nameInputMode) { renderSearch(); return; }
   if (confirmMode) { renderConfirm(); return; }
   if (showWifiInfo) { renderWiFiInfo(); return; }
 
@@ -414,7 +426,7 @@ function render() {
   const navKeys = `${BOLD}[←→]${RESET} Panel  ${focus === 'queue' ? BOLD + '[Tab] ' + (queueView === 'singers' ? 'Band Queue' : 'Singers') + RESET : ''}`;
   const queueKeys = focus === 'queue'
     ? (queueView === 'singers'
-        ? `${BOLD}[p]${RESET} Promote  ${BOLD}[x]${RESET} Remove  ${BOLD}[c]${RESET} Round  ${BOLD}[a]${RESET} Add Song`
+        ? `${BOLD}[p]${RESET} Promote  ${BOLD}[x]${RESET} Remove  ${BOLD}[c]${RESET} Round  ${BOLD}[a]${RESET} Add Singer`
         : `${BOLD}[x]${RESET} Remove  ${BOLD}[a]${RESET} Add Band`)
     : `${BOLD}[a]${RESET} Search+Add`;
   const row1 = `${navKeys}  ${queueKeys}  ${BOLD}[w]${RESET} WiFi  ${BOLD}[r]${RESET} Restart  ${BOLD}[q]${RESET} Quit${showMode === 'connected' ? `  ${BOLD}[s]${RESET} Start Show` : ''}`;
@@ -440,10 +452,24 @@ function renderSearch() {
   const w = cols;
 
   let out = HIDE;
+
+  if (nameInputMode) {
+    const boxW = Math.min(50, w - 4);
+    const boxH = 5;
+    const bx = Math.floor((w - boxW) / 2);
+    const by = Math.floor(rows / 2) - 2;
+    out += drawBox(by, bx, boxW, boxH, '');
+    out += drawText(by + 1, bx + 2, BOLD + `Adding "${(nameInputFor?.title || 'song').substring(0, boxW - 18)}"` + RESET);
+    out += drawText(by + 2, bx + 2, `${BOLD}Singer name:${RESET} ` + CYAN + nameInputBuffer + (nameInputBuffer.length < boxW - 18 ? '█' : '') + RESET);
+    out += drawText(by + 3, bx + 2, DIM + 'Enter submit  Esc cancel' + RESET);
+    process.stdout.write(out);
+    return;
+  }
+
   const boxH = Math.min(rows - 2, 22);
   const boxTop = Math.max(1, Math.floor((rows - boxH) / 2));
 
-  out += drawBox(boxTop, 2, w - 3, boxH, 'SEARCH & ADD');
+  out += drawBox(boxTop, 2, w - 3, boxH, inputPrompt.toUpperCase());
   out += drawText(boxTop + 1, 4, `${BOLD}Search songs by title or artist:${RESET}`);
 
   const inputLine = boxTop + 2;
@@ -525,11 +551,16 @@ function doSearch(query) {
   if (searchCursor >= searchResults.length) searchCursor = Math.max(0, searchResults.length - 1);
 }
 
-function enterSearchMode() {
+function enterSearchMode(target) {
   inputMode = true;
+  inputPrompt = target === 'add-singer' ? 'Add singer — search song' : 'Search & add song';
+  searchTarget = target || 'add';
   inputBuffer = '';
   searchResults = [];
   searchCursor = 0;
+  nameInputMode = false;
+  nameInputBuffer = '';
+  nameInputFor = null;
   renderSearch();
 }
 
@@ -544,17 +575,52 @@ function handleInput(chunk) {
     }
   }
 
-  // In search mode
-  if (inputMode) {
+  // In search mode (or name input)
+  if (inputMode || nameInputMode) {
+    // Name input mode — type singer name
+    if (nameInputMode) {
+      for (const ch of chunk) {
+        if (ch === 27) { nameInputMode = false; inputMode = false; nameInputFor = null; render(); return; }
+        else if (ch === 13) {
+          const name = nameInputBuffer.trim();
+          if (name && nameInputFor) {
+            nameInputMode = false;
+            inputMode = false;
+            const song = nameInputFor;
+            nameInputFor = null;
+            render();
+            doAction('add-singer-name', { name, slug: song.slug }).then(() => render());
+            return;
+          }
+        } else if (ch === 127 || ch === 8) {
+          nameInputBuffer = nameInputBuffer.slice(0, -1);
+          renderSearch();
+        } else if (ch >= 32 && ch <= 126) {
+          nameInputBuffer += String.fromCharCode(ch);
+          renderSearch();
+        }
+      }
+      return;
+    }
+
+    // Song search mode
     for (const ch of chunk) {
       if (ch === 27) { inputMode = false; render(); return; }
       else if (ch === 13) {
         doSearch(inputBuffer);
         if (searchResults.length > 0 && searchCursor < searchResults.length) {
           const song = searchResults[searchCursor];
+          if (searchTarget === 'add-singer') {
+            // Switch to name input after picking song
+            nameInputFor = song;
+            nameInputMode = true;
+            nameInputBuffer = '';
+            renderSearch();
+            return;
+          }
           inputMode = false;
           render();
-          if (focus === 'queue' && queueView === 'band') {
+          if (searchTarget === 'add-band') {
             doAction('add-band', song.slug).then(() => render());
           } else {
             doAction('add', song.slug).then(() => render());
@@ -686,7 +752,15 @@ function handleInput(chunk) {
       case 0x63: case 0x43: // c/C — clear round (only in singers mode)
         if (focus === 'queue' && queueView === 'singers') doAction('clear-round');
         break;
-      case 0x61: case 0x41: enterSearchMode(); break;
+      case 0x61: case 0x41: // a/A — search + add
+        if (focus === 'queue' && queueView === 'band') {
+          enterSearchMode('add-band');
+        } else if (focus === 'queue' && queueView === 'singers') {
+          enterSearchMode('add-singer');
+        } else {
+          enterSearchMode('add');
+        }
+        break;
       case 0x72: case 0x52: doAction('restart'); break;
       case 0x77: case 0x57: showWifiInfo = true; render(); break; // w/W = WiFi info
       case 0x73: case 0x53: // s/S — Start Show
@@ -727,7 +801,7 @@ async function init() {
   process.stdin.setRawMode(true);
   process.stdin.resume();
   process.stdin.on('data', handleInput);
-  process.stdout.on('resize', () => { if (!inputMode && !confirmMode && !showWifiInfo) render(); else if (inputMode) renderSearch(); });
+  process.stdout.on('resize', () => { if (!inputMode && !nameInputMode && !confirmMode && !showWifiInfo) render(); else if (inputMode || nameInputMode) renderSearch(); });
   process.on('exit', () => { process.stdout.write(SHOW); });
   process.on('SIGINT', () => { process.stdout.write(SHOW); process.exit(0); });
   process.on('SIGTERM', () => { process.stdout.write(SHOW); process.exit(0); });
@@ -754,7 +828,7 @@ async function init() {
   setInterval(async () => {
     await checkServer();
     await refreshState();
-    if (!inputMode && !confirmMode && !showWifiInfo) render();
+    if (!inputMode && !nameInputMode && !confirmMode && !showWifiInfo) render();
   }, 2000);
 }
 

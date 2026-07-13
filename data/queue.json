@@ -41,10 +41,61 @@
       "singer": "Placeholder Duo",
       "band_song": true,
       "timestamp": 1783972220915
+    },
+    {
+      "slug": "ALL MY EXS LIVE IN TEXAS",
+      "title": "ALL MY EXS LIVE IN TEXAS",
+      "artist": "George Strait",
+      "key": "",
+      "bpm": 120,
+      "timestamp": 1783972697837
+    },
+    {
+      "slug": "(Sittin on) The dock of the bay",
+      "title": "(Sittin on) The dock of the bay",
+      "artist": "Otis Redding ",
+      "key": "G",
+      "bpm": 120,
+      "timestamp": 1783972702028
     }
   ],
-  "singer_queue": [],
-  "band_queue": [],
+  "singer_queue": [
+    {
+      "id": "mrjndln5ens9",
+      "singer": "Alice",
+      "song_slug": "All Right Now",
+      "song_title": "All Right Now",
+      "song_artist": "Free",
+      "timestamp": 1783972856273,
+      "round": 3
+    }
+  ],
+  "band_queue": [
+    {
+      "slug": "(I Can't Get No) Satisfaction",
+      "title": "(I Can't Get No) Satisfaction",
+      "artist": "The Rolling Stones",
+      "key": "E",
+      "bpm": 120,
+      "timestamp": 1783972665540
+    },
+    {
+      "slug": "ACHY BREAKY HEART",
+      "title": "ACHY BREAKY HEART",
+      "artist": "Billy Ray Cyrus",
+      "key": "",
+      "bpm": 120,
+      "timestamp": 1783972672097
+    },
+    {
+      "slug": "Addicted to Love",
+      "title": "Addicted to Love",
+      "artist": "Robert Palmer",
+      "key": "A",
+      "bpm": 120,
+      "timestamp": 1783972689047
+    }
+  ],
   "current_index": -1,
   "status": "stopped",
   "current_song": null,
