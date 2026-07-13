@@ -388,3 +388,181 @@ Created two printable HTML files (open in Safari → Print → letter 8.5×11):
 
 #### One Command
 `start show server` — starts everything. Ctrl-C stops it all.
+
+---
+
+## Session 6: Band Queue + TUI Improvements — 2026-07-13
+
+`#music #iphoneliveserver #band-queue #tui`
+
+### Problem
+
+The vision document specified a "band queue" that auto-rotates a Placeholder Duo song into every karaoke round. This didn't exist — only a `main_queue` and `singer_queue`. Additionally, the TUI had bugs:
+
+1. **No band queue**: band songs couldn't be pre-loaded for auto-rotation
+2. **Arrow navigation bug**: up/down in the singers panel navigated `main_queue` instead of the displayed singer queue
+3. **No way to build up a queue**: the TUI could only search+add one song at a time to main_queue — couldn't add to band queue or manually add singers
+4. **No queue view switching**: couldn't see or manage a band queue separately
+
+### Solution
+
+#### 1. Band Queue Data Model
+
+Added `band_queue: []` to the queue data model alongside `main_queue` and `singer_queue`. Each entry matches the main_queue format: slug, title, artist, key, bpm, timestamp.
+
+#### 2. Auto-Promote on Round Clear
+
+`POST /api/singer/clear-round` now shifts the first song from `band_queue` into `main_queue` with `singer: "Placeholder Duo"` and `band_song: true`. Band queue acts as FIFO — each clear-round consumes one band song.
+
+```javascript
+if (q.band_queue.length > 0) {
+  const bandSong = q.band_queue.shift();
+  q.main_queue.push({ ...bandSong, singer: 'Placeholder Duo', band_song: true, timestamp: Date.now() });
+}
+q.round++;
+```
+
+#### 3. Band Queue API Endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/api/band-queue` | List band queue (public) |
+| `POST` | `/api/band-queue/add` | Add song to band queue (auth) |
+| `DELETE` | `/api/band-queue/item/:index` | Remove song (auth) |
+| `POST` | `/api/band-queue/clear` | Clear band queue (auth) |
+
+Exposed in `GET /api/queue` as `band_queue` field.
+
+#### 4. TUI: Tab Switches Queue Views
+
+The right panel toggles between two views via **Tab** key. Separate cursors (`singerCursor`, `bandCursor`) preserve position when switching.
+
+| Key | Action |
+|-----|--------|
+| `←` `→` | Switch between NOW PLAYING and queue panel |
+| `Tab` | Toggle between **Singers** and **Band Queue** views |
+| `↑` `↓` | Navigate currently displayed queue |
+
+**Arrow bug fixed**: old code was `queueState.main_queue` regardless of what panel showed. Now correctly navigates `singerQueue.queue` in singers view and `queueState.band_queue` in band view.
+
+#### 5. TUI: Context-Aware Search+Add
+
+| Focus | View | `a` flow |
+|-------|------|----------|
+| REAPER panel | — | Search → add to **main_queue** |
+| Queue panel | Singers | Search → **name prompt** → add to singer queue |
+| Queue panel | Band | Search → add to **band_queue** |
+
+The singer name prompt is a two-step flow: search for a song, then type the singer's name. Enables MC to manually add walk-up singers without phones.
+
+#### 6. TUI: Remove Actions
+
+| Focus | View | `x` flow |
+|-------|------|----------|
+| Queue panel | Singers | Confirm dialog (y/n) → DELETE /api/singer/queue/:id |
+| Queue panel | Band | Instant remove → DELETE /api/band-queue/item/:index |
+
+#### 7. `apiPost` Now Supports HTTP Method
+
+`apiPost(path, body, method)` — third param for `'DELETE'` etc. Was hardcoded to POST.
+
+### Files Changed
+
+| File | Lines | Change |
+|------|-------|--------|
+| `server/api/queue.js` | +60 | Band queue endpoints, auto-promote on clear-round |
+| `server/index.js` | +1 | Whitelist GET /api/band-queue |
+| `scripts/tui.js` | +180 | Tab toggle, dual cursors, name prompt, method param, action labels |
+| `data/queue.json` | +1 | Add `band_queue: []` |
+| `BUILD_LOG.md` | +80 | This entry |
+
+### Test Results (all pass)
+
+```
+GET  /api/band-queue           → {"band_queue": []}
+POST /api/band-queue/add (auth) → {"ok": true, "band_queue": [...]}
+POST /api/singer/clear-round    → band song auto-promoted, band_queue shrinks
+POST /api/singer/clear-round x2 → empty band_queue → band_promoted: null (no crash)
+DELETE /api/band-queue/item/0   → {"ok": true}
+```
+
+### Show Flow
+
+**Pre-show**: Tab to Band Queue → `a` → build 10-20 band auto-rotate songs
+
+**During show**: `c` clears singer round → band song auto-inserts as "Placeholder Duo" → band plays → singers go up → `c` repeats
+
+**Walk-ups**: Tab to Singers → `a` → search song → type name → added to karaoke queue
+
+### Karaoke Toggle — Verified Working
+
+The karaoke ON/OFF toggle (TUI Shift+K, or API `POST /api/singer/toggle`) persists to `config.json`. Singer page polls `/api/singer/status` every 5s:
+
+- **ON**: Signup flow visible, singers can add 2 songs each
+- **OFF**: Red banner with custom message from `config.json`, signup hidden, API returns 403
+
+Tested end-to-end: toggle, message display, signup block, persistence. No changes needed.
+
+---
+
+## Session 7: Setlists Feature — Design Plan — 2026-07-13
+
+`#music #iphoneliveserver #setlists #planning`
+
+### Goal
+
+Pre-create setlists (e.g., "Friday Night 20", "Blues Night", "Country Set") as text files. Load instantly on show day instead of building queue song-by-song.
+
+### File Format
+
+Plain `.txt` or `.md` files in `data/setlists/`. One song slug per line. `#` comments supported. Blank lines ignored.
+
+```
+# Friday Night Set — 20 songs — July 2026
+
+All Right Now
+(Sittin on) The dock of the bay
+(I Can't Get No) Satisfaction
+Brown Eyed Girl
+Proud Mary
+Sweet Home Alabama
+Mustang Sally
+...
+```
+
+Also planned: `.md` with inline notes per song for richer prep:
+
+```markdown
+# Blues Night Set
+1. The Thrill Is Gone (Bm, 88bpm) — opener, slow burn
+2. Pride and Joy (Eb, 128bpm) — pick up energy
+...
+```
+
+### API Endpoints (planned)
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET` | `/api/setlists` | List saved setlists with metadata |
+| `POST` | `/api/setlists/export` | Export current main_queue to file |
+| `POST` | `/api/setlists/import` | Load a setlist (replace or append) |
+| `DELETE` | `/api/setlists/:name` | Delete a setlist |
+
+### TUI Commands (planned)
+
+| Key | Action |
+|-----|--------|
+| `E` | Export — prompt for name, saves current main_queue as `data/setlists/<name>.txt` |
+| `I` | Import — shows picker of saved setlists, `r` replace / `a` append |
+
+### Files to Create
+
+- `server/api/setlists.js` — setlist CRUD endpoints
+- `data/setlists/.gitkeep` — directory placeholder
+
+### Next Steps
+
+- [ ] Implement setlists API + TUI
+- [ ] Create a few sample setlists
+- [ ] Genre tagging UI in show control page
+- [ ] Drag-to-reorder queue on mobile
