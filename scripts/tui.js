@@ -67,6 +67,8 @@ let exportMode = false;
 let exportBuffer = '';
 let maxSongsBetweenBand = 8;
 let promoteCount = 0;
+let bumperPlaying = false;
+let bumperTrack = '';
 let wifiSSID = '';
 let wifiPassword = '';
 let lanIP = '127.0.0.1';
@@ -184,6 +186,7 @@ async function refreshState() {
   await refreshReaperState();
   // Poll connected clients
   await refreshClients();
+  await refreshBumper();
 }
 
 async function refreshReaperState() {
@@ -212,6 +215,41 @@ async function refreshClients() {
       });
     });
     req.on('error', () => resolve());
+    req.end();
+  });
+}
+
+async function refreshBumper() {
+  return new Promise((resolve) => {
+    const req = http.request({ hostname: 'localhost', port: 3000, path: '/bumper/api/status', method: 'GET', timeout: 2000 }, (res) => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => {
+        try { const s = JSON.parse(data); bumperPlaying = s.playing || false; bumperTrack = s.current || ''; } catch {}
+        resolve();
+      });
+    });
+    req.on('error', () => resolve());
+    req.end();
+  });
+}
+
+function bumperPost(action) {
+  return new Promise((resolve) => {
+    const path = action === 'stop' ? '/bumper/api/stop' : action === 'stop-graceful' ? '/bumper/api/stop-graceful' : '/bumper/api/play';
+    const data = JSON.stringify({});
+    const opts = {
+      hostname: 'localhost', port: 3000, path,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) }
+    };
+    const req = http.request(opts, (res) => {
+      let d = '';
+      res.on('data', c => d += c);
+      res.on('end', () => { try { resolve(JSON.parse(d)); } catch { resolve(null); } });
+    });
+    req.on('error', () => resolve(null));
+    req.write(data);
     req.end();
   });
 }
@@ -470,7 +508,8 @@ function render() {
   out += drawText(st + 1, 3, WHITE +
     `Singers ${WHITE}${BOLD}${sc}${RESET}${WHITE}  Setlist ${WHITE}${BOLD}${bc}${RESET}${WHITE}  Round ${singerQueue.round || 1} (${promoteCount}/${maxSongsBetweenBand})  ETA ${WHITE}${BOLD}${queueState.eta_minutes || 0}m${RESET}${WHITE} ${DIM}·${WHITE} ` +
     `Ext ${WHITE}${BOLD}${extPend}${RESET}${WHITE} ${syncLabel} ${DIM}·${WHITE} Karaoke ${karaokeIcon}${WHITE} ${DIM}·${WHITE} ${modeLabel}${WHITE} ${DIM}·${WHITE} ${dellStr}` +
-    (reaperState.currentSong ? ` ${DIM}·${WHITE} ${GREEN + reaperState.currentSong.substring(0,20) + RESET}` : '') + RESET);
+    (reaperState.currentSong ? ` ${DIM}·${WHITE} ${GREEN + reaperState.currentSong.substring(0,20) + RESET}` : '') +
+    (bumperPlaying ? ` ${DIM}·${WHITE} ${YELLOW + '♫ Bumper' + RESET}` : '') + RESET);
   const boxHost = lanIP || process.env.SHOW_IP || 'localhost';
 
   // URLs box
@@ -870,6 +909,19 @@ function handleInput(chunk) {
 
   // In settings or export mode
   if (settingsMode || exportMode) {
+    // Handle escape sequences (arrows) as a unit BEFORE byte-by-byte loop
+    if (chunk[0] === 0x1b && chunk.length >= 3 && chunk[1] === 0x5b) {
+      if (exportMode) { renderSettings(); return; }
+      const dir = chunk[2];
+      if (!settingsField) {
+        if (dir === 0x42 || dir === 0x41) { // any arrow → select the setting
+          settingsField = 'max_songs';
+          settingsValue = String(maxSongsBetweenBand);
+          renderSettings();
+        }
+      }
+      return;
+    }
     // Export mode — type name
     if (exportMode) {
       for (const ch of chunk) {
@@ -956,6 +1008,23 @@ function handleInput(chunk) {
     switch (ch) {
       case 0x71: case 0x51: stopServer(); process.stdout.write(SHOW); process.exit(0);
       case 0x4B: doAction('toggle-karaoke'); break; // Shift+K only
+      case 0x4D: // Shift+M — stop bumper immediately
+        if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode) {
+          bumperPost('stop').then(() => refreshBumper());
+          log('Bumper: stopped immediately');
+        }
+        break;
+      case 0x6D: // m — toggle bumper (play / graceful stop)
+        if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode) {
+          if (bumperPlaying) {
+            bumperPost('stop-graceful').then(() => refreshBumper());
+            log('Bumper: stopping after current track');
+          } else {
+            bumperPost('play').then(() => refreshBumper());
+            log('Bumper: started');
+          }
+        }
+        break;
       case 0x6F: doAction('toggle-external'); break; // o = toggle online/offline
       case 0x4F: doAction('retry-online'); break;    // O = retry internet detection
       case 0x65: doAction('sync-external'); break;    // e = sync now
