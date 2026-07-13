@@ -75,6 +75,7 @@ let sysCpu = 0;
 let sysRam = 0; // GB used
 let sysNet = 0;
 let sysTemp = '';
+let sysThermal = '';
 let lastCpuTimes = null;
 let wifiSSID = '';
 let wifiPassword = '';
@@ -268,6 +269,22 @@ function refreshNetLatency() {
       sysNet = Math.round(parseFloat(stdout.trim()));
     } else {
       sysNet = -1;
+    }
+  });
+}
+
+function refreshThermal() {
+  const { exec } = require('child_process');
+  exec('pmset -g therm 2>&1', { timeout: 2000 }, (err, stdout) => {
+    if (!err && stdout) {
+      const out = stdout.toString();
+      if (out.includes('No thermal warning') && out.includes('No performance warning')) {
+        sysThermal = 'cool';
+      } else if (out.includes('thermal_warning') || out.includes('SCHEDULER')) {
+        sysThermal = 'hot';
+      } else {
+        sysThermal = 'warm';
+      }
     }
   });
 }
@@ -470,7 +487,8 @@ function render() {
   // System stats row
   const statsRow = showMode === 'live' ? 2 : 3;
   const netStr = sysNet < 0 ? DIM + '--ms' + RESET : (sysNet < 30 ? GREEN : sysNet < 60 ? YELLOW : RED) + sysNet + 'ms' + RESET;
-  out += ESC + statsRow + ';' + (w - 38) + 'H' + DIM + 'CPU ' + WHITE + sysCpu + '%' + RESET + DIM + '  RAM ' + WHITE + sysRam + 'GB' + RESET + DIM + '  Net ' + netStr + RESET + ESC + '0K';
+  const thermStr = sysThermal === 'cool' ? GREEN + 'OK' + RESET : sysThermal === 'warm' ? YELLOW + 'WARM' + RESET : RED + 'HOT!' + RESET;
+  out += ESC + statsRow + ';' + (w - 46) + 'H' + DIM + 'CPU ' + WHITE + sysCpu + '%' + RESET + DIM + '  RAM ' + WHITE + sysRam + 'GB' + RESET + DIM + '  Temp ' + thermStr + RESET + DIM + '  Net ' + netStr + RESET + ESC + '0K';
 
   const lw = Math.floor((w - 3) / 2);
   const rw = w - 3 - lw;
@@ -1274,7 +1292,9 @@ async function init() {
   await loadSongCache();
   await refreshState();
   refreshNetLatency();
+  refreshThermal();
   setInterval(refreshNetLatency, 30000);
+  setInterval(refreshThermal, 30000);
   // Sync show mode to server
   apiPost('/api/show-mode', { mode: showMode }).catch(() => {});
   render();
