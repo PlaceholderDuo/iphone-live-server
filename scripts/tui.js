@@ -72,7 +72,7 @@ let bumperPlaying = false;
 let bumperTrack = '';
 let bumperVolume = 20;
 let sysCpu = 0;
-let sysRam = 0;
+let sysRam = 0; // GB used
 let sysNet = 0;
 let sysTemp = '';
 let lastCpuTimes = null;
@@ -470,7 +470,7 @@ function render() {
   // System stats row
   const statsRow = showMode === 'live' ? 2 : 3;
   const netStr = sysNet < 0 ? DIM + '--ms' + RESET : (sysNet < 30 ? GREEN : sysNet < 60 ? YELLOW : RED) + sysNet + 'ms' + RESET;
-  out += ESC + statsRow + ';' + (w - 36) + 'H' + DIM + 'CPU ' + WHITE + sysCpu + '%' + RESET + DIM + '  RAM ' + WHITE + sysRam + '%' + RESET + DIM + '  Net ' + netStr + RESET + ESC + '0K';
+  out += ESC + statsRow + ';' + (w - 38) + 'H' + DIM + 'CPU ' + WHITE + sysCpu + '%' + RESET + DIM + '  RAM ' + WHITE + sysRam + 'GB' + RESET + DIM + '  Net ' + netStr + RESET + ESC + '0K';
 
   const lw = Math.floor((w - 3) / 2);
   const rw = w - 3 - lw;
