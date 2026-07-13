@@ -742,8 +742,135 @@ Removed duplicate `case 0x45` handler that auto-exported without prompting. Clea
 | `?` | Always | Settings (max songs between band) |
 | `Shift+K` | Always | Toggle karaoke ON/OFF |
 | `Shift+S` | SETUP mode | Start the show (go LIVE) |
+| `c` | Singers | Clear round (confirm) |
+| `a` | Any | Search + add (context-aware target) |
+| `E` | Always | Export setlist (prompt for name) |
+| `I` | Always | Import setlist (picker) |
+| `?` | Always | Settings (max songs between band) |
+| `n` | Anywhere | Load next song |
+| `b` | Anywhere | Load previous song |
+| `Space` | Anywhere | Play / Stop / Start setlist |
+| `Enter` | Setlist view | Play on the fly — promote song to main queue |
+| `m` | Anywhere | Bumper toggle (play / graceful stop) |
+| `Shift+M` | Anywhere | Bumper stop immediately |
+| `[` | Anywhere | Bumper volume -5% |
+| `]` | Anywhere | Bumper volume +5% |
+| `Shift+K` | Always | Toggle karaoke ON/OFF |
+| `Shift+S` | SETUP mode | Start the show (go LIVE) |
 | `w` | Always | WiFi info overlay |
 | `e` | Always | Sync external submissions |
 | `o` | Always | Toggle online/offline |
 | `r` | Always | Restart server |
-| `q` | Always | Quit (stops everything) |
+| `q` | Always | Quit + stop bumper + stop server |
+
+---
+
+## Session 10: Architecture Simplify + Playback + Bumper + Polish — 2026-07-13
+
+`#music #iphoneliveserver #architecture #bumper #polish`
+
+### Architecture Simplification
+
+**Setlist = Band Queue.** One source of truth. Import populates `band_queue`. Export saves `band_queue`. Auto-rotate consumes from `band_queue`. Tab now cycles 2 views: Singers ↔ Setlist. Removed the redundant 3-view cycle.
+
+### TUI Playback Controls
+
+| Key | Action |
+|-----|--------|
+| `n` | Load next song |
+| `b` | Load previous song |
+| `Space` | Play (if loaded) / Stop (if playing) / Start setlist (if nothing loaded) |
+| `Enter` | Play on the fly — promote selected setlist song to main queue (inserted after current) |
+
+The API endpoints (`/api/queue/load-next`, `/api/queue/load-prev`, `/api/queue/play`, `/api/queue/stop`, `/api/queue/start-setlist`) were already built in Session 1 but had no TUI key bindings.
+
+### Play on the Fly
+
+`Enter` in Setlist view takes the selected band_queue song and promotes it to `main_queue` via new `POST /api/band-queue/promote` endpoint. Inserted right after the currently loaded song so it plays next. Seamless — audience doesn't know it wasn't planned.
+
+### Clear Round Confirmation
+
+`c` in Singers view now shows a confirm dialog: "Clear Round 3 (5 singers)? y/n". Prevents accidental round clears.
+
+### Now Playing Indicator
+
+The currently loaded song shows a green `▶` in the Setlist view, alongside the regular cursor highlight.
+
+### Per-Song Notes
+
+When a setlist song is highlighted with the cursor, the TUI displays tuning, capo, and difficulty from `meta.json`:
+```
+3. American Girl [G]  capo 2 · intermediate
+```
+Data comes from the song library cache (`songCache`), loaded at TUI startup.
+
+### Duplicate Detection
+
+`POST /api/queue/add` now tags entries with `duplicate: true` if the same slug already exists in `main_queue`. TUI logs: `"Added: All Right Now (DUPLICATE!)"` with a warning message.
+
+### ETA Display
+
+Both the band page and singer page show estimated time remaining (5 min per song):
+
+- **TUI stats bar**: `ETA 30m` (main_queue remaining)
+- **Band page**: `5 singers in queue (Round 2) (~25 min)`
+- **Singer page**: `~20 min of singers waiting`
+
+API: `GET /api/queue` returns `eta_minutes` (main_queue) and `singer_eta_minutes`. `GET /api/singer/queue` returns `eta_minutes` (singer_queue).
+
+### Singer Page — Band Playing Indicator
+
+When a band song (`band_song: true`, `singer: "Placeholder Duo"`) is the current song, the singer page shows a yellow banner:
+```
+Placeholder Duo — Band is playing — singers coming up next!
+```
+The band page shows a similar "Now Playing — Placeholder Duo" card.
+
+### Bumper Music Control
+
+| Key | Action |
+|-----|--------|
+| `m` | Start bumper / Graceful stop (track plays to end, then silence) |
+| `Shift+M` | Stop immediately |
+| `[` | Volume -5% (immediate restart at new volume) |
+| `]` | Volume +5% (immediate restart at new volume) |
+
+Volume persists to `~/.bumper-volume` — survives restarts. Default 20%. Range 5-100%.
+
+### Bumper Bug Fix — Explicit Stop Flag
+
+The bridge server had a critical bug: when `bumperStop()` killed the `afplay` process, the exit handler auto-played the next track. This created an infinite music loop that couldn't be stopped. 
+
+Fix: Added `bumperExplicitStop` flag. Set to `true` in `bumperStop()`. The exit handler checks this flag and skips auto-next when set. Also added `bumperGracefulStop` flag for the graceful stop feature.
+
+Bridge server file: `~/Library/Application Support/REAPER/Scripts/Live Show Manager/web/server.js`
+
+New endpoints on bridge server (:3000):
+- `POST /bumper/api/stop-graceful` — stops after current track
+- `POST /bumper/api/volume/up` — +5% volume
+- `POST /bumper/api/volume/down` — -5% volume
+- `GET /bumper/api/status` now includes `volume` field
+
+### Settings Arrow Key Fix
+
+Settings overlay (`?`) had broken arrow key navigation. Escape sequences (`\x1b[A`) were processed byte-by-byte in a `for...of` loop, causing `\x1b` (Esc) to exit settings mode before the arrow key arrived. Fix: check for multi-byte escape sequences BEFORE the byte loop.
+
+### TUI Quit — Stops Bumper
+
+`q` now calls `bumperPost('stop')` before shutting down, ensuring no orphaned `afplay` processes.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `scripts/tui.js` | +playback keys (n/b/Space), +Enter play-on-the-fly, +clear confirm, +now-playing indicator, +per-song notes, +duplicate logging, +ETA display, +bumper control (m/Shift+M/[ ]/), +settings arrow fix, +quit stops bumper |
+| `server/api/queue.js` | +duplicate detection, +ETA fields, +band-queue/promote endpoint |
+| `server/api/setlists.js` | Import populates band_queue instead of main_queue, +failed slugs reporting |
+| `server/public/singer.html` | +ETA display, +band playing indicator |
+| `server/public/band.html` | +ETA display, +Placeholder Duo card |
+| `BUILD_LOG.md` | +this session |
+| `web/server.js` (LSM bridge) | +explicitStop flag, +graceful stop, +volume endpoints, +volume persistence |
+
+### Bumper Volume Behavior
+
+Volume changes restart the current track immediately at the new volume for instant feedback. Volume persists to `~/.bumper-volume`. On next bridge server restart, it loads the saved volume.
