@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Singer Queue</title>
+<link rel="stylesheet" href="/css/style.css">
+<style>
+.song-picker { max-height: 360px; overflow-y: auto; margin: 8px 0; border: 1px solid #333; border-radius: 8px; }
+.song-picker .song-item.selected { background: var(--accent2); border-left: 3px solid var(--accent); }
+.step { display: none; }
+.step.active { display: block; }
+
+.my-songs { text-align: center; padding: 20px 0; }
+.my-songs .checkmark { font-size: 44px; color: var(--green); margin-bottom: 8px; }
+.my-songs h3 { color: var(--text); margin-bottom: 4px; }
+.my-songs .subtitle { font-size: 12px; color: var(--text2); margin-bottom: 16px; }
+
+.song-slot {
+  background: var(--surface2); border-radius: 8px; padding: 14px 16px; margin: 8px 0;
+  display: flex; justify-content: space-between; align-items: center; text-align: left;
+  border: 1px solid #222; cursor: pointer; transition: background 0.1s;
+}
+.song-slot:active { background: #1a2744; }
+.song-slot .slot-num {
+  font-size: 10px; font-weight: 700; color: var(--accent);
+  text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px;
+}
+.song-slot .slot-title { font-weight: 600; font-size: 15px; color: var(--text); }
+.song-slot .slot-artist { font-size: 12px; color: var(--text2); }
+.song-slot .slot-arrow { color: var(--text2); font-size: 16px; }
+.song-slot.empty {
+  cursor: default; opacity: 0.5; justify-content: center; border-style: dashed;
+}
+.song-slot.empty .slot-num { color: var(--text2); }
+.song-slot.empty .slot-title { color: var(--text2); font-weight: 400; }
+.song-slot.next-round { border-left: 3px solid var(--yellow); }
+.song-slot.next-round .slot-num { color: var(--yellow); }
+.song-slot.current { border-left: 3px solid var(--green); }
+.song-slot.current .slot-num { color: var(--green); }
+
+.add-another { margin-top: 12px; }
+
+.singer-entry { cursor: default; }
+.singer-entry.mine { cursor: pointer; border-left: 2px solid var(--accent); }
+.singer-entry.mine:active { background: var(--surface2); }
+
+/* ─── Modal ─── */
+.modal-overlay {
+  display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85);
+  z-index: 500; align-items: center; justify-content: center;
+}
+.modal-overlay.show { display: flex; }
+.modal-box {
+  background: var(--surface); border-radius: 10px; padding: 24px 20px;
+  width: 90%; max-width: 380px; text-align: center; margin: 20px;
+}
+.modal-box h3 { font-size: 16px; margin-bottom: 6px; }
+.modal-box .modal-song { font-size: 18px; font-weight: 700; margin-bottom: 2px; }
+.modal-box .modal-artist { font-size: 13px; color: var(--text2); margin-bottom: 16px; }
+.modal-box .modal-msg { font-size: 13px; color: var(--text2); margin-bottom: 16px; line-height: 1.5; }
+.modal-box .btn { width: 100%; margin: 4px 0; }
+
+.leave-btn {
+  position: absolute; top: 14px; right: 14px;
+  background: transparent; border: 1px solid #444; color: var(--text2);
+  border-radius: 6px; padding: 4px 10px; font-size: 11px;
+  cursor: pointer; z-index: 10;
+  -webkit-tap-highlight-color: transparent;
+}
+.leave-btn:active { background: var(--surface2); color: var(--red); border-color: var(--red); }
+
+.confetti-container {
+  position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden;
+}
+.confetti-piece {
+  position: absolute; width: 6px; height: 6px; border-radius: 2px;
+  animation: confettiFall linear infinite;
+  opacity: 0;
+}
+@keyframes confettiFall {
+  0%   { transform: translateY(-10vh) rotate(0deg); opacity: 0; }
+  10%  { opacity: 0.5; }
+  90%  { opacity: 0.3; }
+  100% { transform: translateY(105vh) rotate(720deg); opacity: 0; }
+}
+</style>
+</head><body>
+<div class="container" style="max-width:480px;position:relative;z-index:1">
+  <button class="leave-btn" id="leaveBtn" style="display:none" onclick="confirmLeave()">Leave</button>
+
+  <div class="card" style="text-align:center;margin-bottom:12px">
+    <h2>Live Band Karaoke with Placeholder Duo!</h2>
+    <p class="text-sm">Pick your songs, get on stage!</p>
+  </div>
+
+  <div id="karaokePaused" class="card" style="display:none;background:var(--red);border-color:var(--red);margin-bottom:8px;text-align:center">
+    <p id="karaokeMsg" class="text-sm" style="color:#fff;font-weight:600"></p>
+  </div>
+
+  <div id="signupFlow">
+    <!-- Step 1: Name -->
+    <div id="step1" class="step active">
+      <div class="card">
+        <h3>1. What's your name?</h3>
+        <input id="singerName" placeholder="Your name or stage name" maxlength="40" autocomplete="off">
+        <div id="nameError" class="text-sm mt-4" style="color:var(--red);display:none"></div>
+        <button class="btn" style="width:100%;margin-top:8px" onclick="goStep2()">Next</button>
+      </div>
+    </div>
+
+    <!-- Step 2: Pick song -->
+    <div id="step2" class="step">
+      <div class="card">
+        <div id="step2Title"><h3>2. Pick a song</h3></div>
+        <input id="songSearch" placeholder="Search songs or artists..." oninput="onSearchChange()" autocomplete="off">
+        <div class="flex gap-sm mt-4">
+          <select id="genreFilter2" onchange="onSearchChange()" style="flex:1">
+            <option value="">All Genres</option>
+          </select>
+          <select id="sortSelect2" onchange="onSearchChange()" style="flex:1">
+            <option value="title">Title</option>
+            <option value="artist">Artist</option>
+            <option value="key">Key</option>
+          </select>
+        </div>
+        <div id="songPicker" class="song-picker"></div>
+        <div class="flex gap-sm mt-8">
+          <button class="btn btn-ghost btn-sm" onclick="goStep1()">Back</button>
+          <button class="btn btn-sm" style="flex:1" onclick="submitSinger()" id="submitBtn" disabled>Join Queue</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 3: Your Songs -->
+    <div id="step3" class="step">
+      <div class="card my-songs">
+        <div class="checkmark">&#10003;</div>
+        <h3 id="resultTitle">You're in!</h3>
+        <p class="subtitle" id="resultSubtitle"></p>
+        <div id="mySongSlots"></div>
+        <div id="addAnotherWrap" class="add-another"></div>
+        <div id="step3Actions"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="queueDisplay">
+    <div class="flex-between">
+      <h3>Queue</h3>
+      <span id="queueSize" class="text-sm">0 singers</span>
+    </div>
+    <div id="singerQueueList"></div>
+  </div>
+
+  <div class="card" style="text-align:center;margin-top:8px">
+    <a id="tipLink" href="#" target="_blank" rel="noopener" class="btn btn-yellow" style="width:100%">Tip the Band!</a>
+  </div>
+</div>
+
+<!-- Modal -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal-box" id="modalBox"></div>
+</div>
+
+<div class="confetti-container" id="confetti"></div>
+
+<script>
+let allSongs = [], selectedSong = null, singerName = '';
+let changeTargetId = null; // id of entry being changed, if any
+
+async function api(url, opts) {
+  try {
+    const r = await fetch(url, opts);
+    return r.json();
+  } catch(e) { return null; }
+}
+
+async function loadSongs() {
+  const r = await api('/api/songs/search?per_page=500');
+  if (r) allSongs = r.songs;
+}
+async function loadGenres() {
+  const r = await api('/api/songs/genres');
+  if (r) {
+    const sel = document.getElementById('genreFilter2');
+    r.genres.forEach(g => { const o = document.createElement('option'); o.value = g; o.textContent = g; sel.appendChild(o); });
+  }
+}
+async function loadTipUrl() {
+  const r = await api('/api/config');
+  if (r && r.tip_url) document.getElementById('tipLink').href = r.tip_url;
+}
+async function checkKaraokeStatus() {
+  const r = await api('/api/singer/status');
+  if (!r) return;
+  const paused = document.getElementById('karaokePaused');
+  const flow = document.getElementById('signupFlow');
+  if (r.karaoke_enabled) {
+    paused.style.display = 'none';
+    flow.style.display = 'block';
+  } else {
+    document.getElementById('karaokeMsg').textContent = r.karaoke_paused_message || 'Karaoke is paused';
+    paused.style.display = 'block';
+    flow.style.display = 'none';
+  }
+}
+
+function onSearchChange() {
+  const q = document.getElementById('songSearch').value.trim().toLowerCase();
+  const genre = document.getElementById('genreFilter2').value;
+  const sort = document.getElementById('sortSelect2').value;
+  let results = allSongs;
+  if (q) results = results.filter(s => s.title.toLowerCase().includes(q) || s.artist.toLowerCase().includes(q));
+  if (genre) results = results.filter(s => s.genres.includes(genre));
+  if (sort === 'title') results.sort((a,b) => a.title.localeCompare(b.title));
+  else if (sort === 'artist') results.sort((a,b) => a.artist.localeCompare(b.artist));
+  else if (sort === 'key') results.sort((a,b) => a.key.localeCompare(b.key));
+  else results.sort((a,b) => a.title.localeCompare(b.title));
+  renderSongPicker(results.slice(0, 100));
+}
+
+function renderSongPicker(songs) {
+  const el = document.getElementById('songPicker');
+  if (songs.length === 0) { el.innerHTML = '<div class="song-item" style="cursor:default;justify-content:center;color:var(--text2);padding:16px">No songs found</div>'; return; }
+  el.innerHTML = songs.map(s => {
+    const isSel = selectedSong && selectedSong.slug === s.slug;
+    return `<div class="song-item${isSel?' selected':''}" onclick="selectSong('${s.slug}','${esc(s.title)}','${esc(s.artist)}')">
+      <div><div class="title">${esc(s.title)}</div><div class="artist">${esc(s.artist)}</div></div>
+      <div class="text-sm">${esc(s.key)} ${(s.genres||[]).map(g=>`<span class="tag">${g}</span>`).join('')}</div>
+    </div>`;
+  }).join('');
+}
+
+function selectSong(slug, title, artist) {
+  selectedSong = { slug, title, artist };
+  document.querySelectorAll('.song-picker .song-item').forEach(e => e.classList.remove('selected'));
+  document.querySelectorAll('.song-picker .song-item').forEach(e => {
+    if (e.textContent.includes(title)) e.classList.add('selected');
+  });
+  document.getElementById('submitBtn').disabled = false;
+}
+
+function goStep1() {
+  document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+  document.getElementById('step1').classList.add('active');
+  changeTargetId = null;
+}
+function goStep2() {
+  const name = document.getElementById('singerName').value.trim();
+  const errEl = document.getElementById('nameError');
+  if (!name || name.length < 1) { errEl.textContent = 'Please enter your name'; errEl.style.display = 'block'; return; }
+  singerName = name;
+  errEl.style.display = 'none';
+  selectedSong = null;
+  document.getElementById('submitBtn').disabled = true;
+  document.getElementById('submitBtn').textContent = 'Join Queue';
+  document.getElementById('step2Title').innerHTML = '<h3>2. Pick a song</h3>';
+  document.getElementById('songSearch').value = '';
+  document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+  document.getElementById('step2').classList.add('active');
+  document.getElementById('songSearch').focus();
+  onSearchChange();
+}
+
+function goStep2ForChange(id) {
+  changeTargetId = id;
+  selectedSong = null;
+  document.getElementById('submitBtn').disabled = true;
+  document.getElementById('submitBtn').textContent = 'Change Song';
+  document.getElementById('step2Title').innerHTML = '<h3>Choose your new song</h3>';
+  document.getElementById('songSearch').value = '';
+  document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+  document.getElementById('step2').classList.add('active');
+  document.getElementById('songSearch').focus();
+  onSearchChange();
+}
+
+async function submitSinger() {
+  if (!selectedSong) return;
+  const btn = document.getElementById('submitBtn');
+  btn.disabled = true; btn.textContent = 'Submitting...';
+
+  if (changeTargetId) {
+    const r = await api('/api/singer/change', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ id: changeTargetId, song_slug: selectedSong.slug })
+    });
+    btn.disabled = false; btn.textContent = 'Change Song';
+    if (r && r.ok) {
+      changeTargetId = null;
+      showMySongs();
+    } else if (r && r.locked) {
+      showModal('Locked', selectedSong.title, selectedSong.artist || '', r.error, false);
+    } else {
+      alert(r ? r.error : 'Failed to change');
+    }
+    return;
+  }
+
+  const r = await api('/api/singer/add', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ singer: singerName, song_slug: selectedSong.slug })
+  });
+  if (r && r.ok) {
+    localStorage.setItem('singerName', singerName);
+    showMySongs();
+    loadSingerQueue();
+  } else {
+    btn.disabled = false; btn.textContent = 'Join Queue';
+    if (r && r.error) {
+      goStep1();
+      document.getElementById('nameError').textContent = r.error;
+      document.getElementById('nameError').style.display = 'block';
+      document.getElementById('singerName').style.borderColor = 'var(--red)';
+      setTimeout(function() {
+        document.getElementById('singerName').style.borderColor = '';
+      }, 2000);
+    }
+  }
+}
+
+function showMySongs() {
+  document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+  document.getElementById('step3').classList.add('active');
+  loadMySongs();
+}
+
+async function loadMySongs() {
+  const r = await api('/api/singer/queue');
+  if (!r) return;
+  const mySongs = (r.queue || []).filter(e => e.singer === singerName);
+
+  document.getElementById('leaveBtn').style.display = mySongs.length > 0 ? 'block' : 'none';
+  document.getElementById('step3Actions').innerHTML = '';
+
+  document.getElementById('resultTitle').textContent = mySongs.length === 1 ? 'You\'re in!' : 'Your Songs';
+  document.getElementById('resultSubtitle').textContent = 'You can add up to 2 songs at a time';
+
+  // Restore checkmark state (in case leaving changed it)
+  document.getElementById('step3').querySelector('.checkmark').textContent = '\u2713';
+
+  const slotsEl = document.getElementById('mySongSlots');
+  let html = '';
+
+  for (let i = 0; i < 2; i++) {
+    const s = mySongs[i];
+    const pos = s ? r.queue.indexOf(s) : -1;
+    if (s) {
+      const cls = i === 0 ? 'current' : 'next-round';
+      const label = i === 0 ? 'This Round' : 'Next Round';
+      html += `<div class="song-slot ${cls}" data-id="${s.id}" data-pos="${pos}" onclick="openSongModal(this)">
+        <div>
+          <div class="slot-num">${label}</div>
+          <div class="slot-title">${esc(s.song_title)}</div>
+          <div class="slot-artist">${esc(s.song_artist)}</div>
+        </div>
+        <div class="slot-arrow">&#9654;</div>
+      </div>`;
+    } else {
+      html += `<div class="song-slot empty">
+        <div>
+          <div class="slot-num">${i === 0 ? 'This Round' : 'Next Round'}</div>
+          <div class="slot-title">No song picked</div>
+        </div>
+      </div>`;
+    }
+  }
+  slotsEl.innerHTML = html;
+
+  const addWrap = document.getElementById('addAnotherWrap');
+  if (mySongs.length < 2) {
+    addWrap.innerHTML = '<button class="btn btn-blue" style="width:100%" onclick="addAnother()">Add Another Song</button>';
+  } else {
+    addWrap.innerHTML = '';
+  }
+}
+
+function addAnother() {
+  document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+  document.getElementById('step2').classList.add('active');
+  document.getElementById('step2Title').innerHTML = '<h3>Pick your next song</h3>';
+  document.getElementById('submitBtn').textContent = 'Join Queue';
+  document.getElementById('submitBtn').disabled = true;
+  selectedSong = null;
+  document.getElementById('songSearch').value = '';
+  document.getElementById('songSearch').focus();
+  onSearchChange();
+}
+
+function openSongModal(el) {
+  const id = el.dataset.id;
+  const pos = parseInt(el.dataset.pos);
+  const title = el.querySelector('.slot-title').textContent;
+  const artist = el.querySelector('.slot-artist').textContent;
+
+  if (pos < 3) {
+    showModal('Locked', title, artist, 'Sorry, your song cannot be changed at this time. Songs are locked-in once you are 3rd in the queue.', false);
+  } else {
+    showModal('Your Song', title, artist, '', true);
+  }
+}
+
+function showModal(heading, title, artist, msg, canChange) {
+  const box = document.getElementById('modalBox');
+  let html = `<h3>${esc(heading)}</h3>`;
+  html += `<div class="modal-song">${esc(title)}</div>`;
+  html += `<div class="modal-artist">${esc(artist)}</div>`;
+  if (msg) html += `<div class="modal-msg">${esc(msg)}</div>`;
+  if (canChange) {
+    html += `<button class="btn" onclick="changeSong()">Change Song</button>`;
+  }
+  html += `<button class="btn btn-ghost" onclick="closeModal()">Go Back</button>`;
+  box.innerHTML = html;
+  document.getElementById('modalOverlay').classList.add('show');
+}
+
+function closeModal() {
+  document.getElementById('modalOverlay').classList.remove('show');
+}
+document.getElementById('modalOverlay').addEventListener('click', function(e) {
+  if (e.target === this) closeModal();
+});
+
+function changeSong() {
+  closeModal();
+  const slot = document.querySelector('.song-slot.current[data-id], .song-slot.next-round[data-id]');
+  const id = slot ? slot.dataset.id : null;
+  if (id) goStep2ForChange(id);
+}
+
+function confirmLeave() {
+  document.getElementById('modalOverlay').classList.add('show');
+  document.getElementById('modalBox').innerHTML =
+    '<h3>Leave the queue?</h3>' +
+    '<div class="modal-msg">This will remove all your songs from the queue. You can always rejoin later.</div>' +
+    '<button class="btn btn-danger" onclick="doLeave()">Yes, remove my songs</button>' +
+    '<button class="btn btn-ghost" onclick="closeModal()">Go Back</button>';
+}
+
+async function doLeave() {
+  closeModal();
+  const r = await api('/api/singer/leave', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ singer: singerName })
+  });
+  if (r && r.ok) {
+    localStorage.removeItem('singerName');
+    document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+    document.getElementById('step3').classList.add('active');
+    document.getElementById('mySongSlots').innerHTML = '';
+    document.getElementById('addAnotherWrap').innerHTML = '';
+    document.getElementById('resultTitle').textContent = 'Thanks for coming!';
+    document.getElementById('resultSubtitle').textContent = 'Your songs have been removed. Come back anytime.';
+    document.getElementById('leaveBtn').style.display = 'none';
+    document.getElementById('step3').querySelector('.checkmark').textContent = '\u{1F44B}';
+    document.getElementById('step3Actions').innerHTML =
+      '<button class="btn btn-ghost mt-8" onclick="singerName=\'\';document.getElementById(\'singerName\').value=\'\';resetAll()">Join the queue</button>';
+    loadSingerQueue();
+  } else {
+    alert('Something went wrong. Please try again.');
+  }
+}
+
+function resetAll() {
+  changeTargetId = null;
+  selectedSong = null;
+  singerName = '';
+  document.getElementById('singerName').value = '';
+  document.getElementById('submitBtn').disabled = true;
+  document.getElementById('submitBtn').textContent = 'Join Queue';
+  document.getElementById('leaveBtn').style.display = 'none';
+  document.getElementById('step3').querySelector('.checkmark').textContent = '\u2713';
+  document.getElementById('step3Actions').innerHTML = '';
+  document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+  document.getElementById('step1').classList.add('active');
+  document.getElementById('singerName').focus();
+}
+
+async function loadSingerQueue() {
+  const r = await api('/api/singer/queue');
+  if (!r) return;
+  const el = document.getElementById('singerQueueList');
+  document.getElementById('queueSize').textContent = r.queue.length + ' singers';
+  if (r.queue.length === 0) { el.innerHTML = '<div class="song-item" style="cursor:default;justify-content:center;color:var(--text2);padding:16px">No one in queue yet</div>'; return; }
+  el.innerHTML = r.queue.map((e, i) => {
+    const isMine = singerName && e.singer === singerName;
+    return `<div class="singer-entry${isMine?' mine':''}" data-id="${e.id}" onclick="${isMine?`openQueueEntry('${e.id}',${i})`:'return'}">
+      <div><div class="singer-name">${esc(e.singer)}${isMine?' <span class="tag tag-accent">you</span>':''}</div><div class="text-sm">${esc(e.song_title)} — ${esc(e.song_artist)}</div></div>
+      <span class="badge">${i+1}</span>
+    </div>`;
+  }).join('');
+}
+
+function openQueueEntry(id, pos) {
+  // Open the modal from the queue click
+  const slotEl = document.querySelector(`.song-slot[data-id="${id}"]`);
+  if (slotEl) {
+    openSongModal(slotEl);
+  } else {
+    // Build modal manually from queue data
+    if (pos < 3) {
+      showModal('Locked', '', '', 'Sorry, your song cannot be changed at this time. Songs are locked-in once you are 3rd in the queue.', false);
+    } else {
+      showModal('Your Song', '', '', '', false);
+    }
+  }
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+document.getElementById('singerName').addEventListener('keydown', e => { if (e.key === 'Enter') goStep2(); });
+document.getElementById('songSearch').addEventListener('keydown', e => { if (e.key === 'Enter' && selectedSong) submitSinger(); });
+
+loadSongs();
+loadGenres();
+loadTipUrl();
+loadSingerQueue();
+checkKaraokeStatus();
+setInterval(loadSingerQueue, 5000);
+setInterval(checkKaraokeStatus, 5000);
+document.getElementById('singerName').focus();
+
+var savedName = localStorage.getItem('singerName');
+if (savedName) {
+  singerName = savedName;
+  document.getElementById('singerName').value = savedName;
+  document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+  document.getElementById('step3').classList.add('active');
+  loadMySongs();
+}
+
+(function initConfetti() {
+  var colors = ['#e94560','#f1c40f','#2ecc71','#3498db','#e91e90','#ff8800'];
+  var container = document.getElementById('confetti');
+  var pieces = [];
+  for (var i = 0; i < 20; i++) {
+    var el = document.createElement('div');
+    el.className = 'confetti-piece';
+    el.style.left = Math.random() * 100 + '%';
+    el.style.background = colors[i % colors.length];
+    el.style.width = (3 + Math.random() * 6) + 'px';
+    el.style.height = (3 + Math.random() * 8) + 'px';
+    el.style.animationDuration = (8 + Math.random() * 12) + 's';
+    el.style.animationDelay = (Math.random() * -15) + 's';
+    container.appendChild(el);
+  }
+})();
+</script>
+</body></html>

@@ -1,0 +1,22 @@
+#!/bin/bash
+# stop-show — Kill all show servers
+# Usage: stop show server   (from anywhere via .zshrc alias)
+
+echo "♪ Stopping all show servers..."
+
+# Kill any afplay bumper music first
+pkill -9 -f "afplay.*/bumper" 2>/dev/null || true
+
+# Kill Stage HUD + Bumper (:5800)
+lsof -ti:5800 2>/dev/null | xargs kill -9 2>/dev/null || true
+echo "  Stage HUD + Bumper: stopped"
+
+# Kill main show servers (:3300 + :3000)
+lsof -ti:3300 2>/dev/null | xargs kill -9 2>/dev/null || true
+lsof -ti:3000 2>/dev/null | xargs kill -9 2>/dev/null || true
+echo "  Show servers: stopped"
+
+# Also stop the launchd-managed LSM server if running
+launchctl stop com.liveshowmanager.bridge 2>/dev/null || true
+
+echo "♪ All clear."

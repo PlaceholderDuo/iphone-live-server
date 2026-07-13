@@ -1,0 +1,51 @@
+{
+  "main_queue": [
+    {
+      "slug": "All Right Now",
+      "title": "All Right Now",
+      "artist": "Free",
+      "key": "A",
+      "bpm": 120,
+      "timestamp": 1783971130166
+    },
+    {
+      "slug": "(Sittin on) The dock of the bay",
+      "title": "(Sittin on) The dock of the bay",
+      "artist": "Otis Redding ",
+      "key": "G",
+      "bpm": 120,
+      "timestamp": 1783971148582
+    },
+    {
+      "slug": "(I Can't Get No) Satisfaction",
+      "title": "(I Can't Get No) Satisfaction",
+      "artist": "The Rolling Stones",
+      "key": "E",
+      "bpm": 120,
+      "timestamp": 1783971155826
+    },
+    {
+      "slug": "(Sittin on) The dock of the bay",
+      "title": "(Sittin on) The dock of the bay",
+      "artist": "Otis Redding ",
+      "key": "G",
+      "bpm": 120,
+      "timestamp": 1783971182089
+    }
+  ],
+  "singer_queue": [
+    {
+      "id": "mrjmc4qx13qp",
+      "singer": "dan",
+      "song_slug": "A Boy Named Sue",
+      "song_title": "A Boy Named Sue",
+      "song_artist": "Johnny Cash",
+      "timestamp": 1783971108105,
+      "round": 1
+    }
+  ],
+  "current_index": -1,
+  "status": "stopped",
+  "current_song": null,
+  "round": 1
+}

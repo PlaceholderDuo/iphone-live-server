@@ -1,0 +1,14 @@
+{
+  "name": "iphone-live-server",
+  "version": "1.0.0",
+  "description": "iPhone webserver for live music performance rig",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "cookie-parser": "^1.4.6"
+  }
+}

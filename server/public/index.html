@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Show Control</title>
+<link rel="stylesheet" href="/css/style.css">
+<style>
+.banner { background: #1a1a2e; border: 1px solid #e94560; border-radius: 8px; padding: 12px; margin-bottom: 12px; text-align: center; font-size: 13px; color: #e94560; }
+.singer-entry { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid #222; }
+.singer-entry:last-child { border-bottom: none; }
+</style>
+</head><body>
+<div class="container">
+  <div class="nav">
+    <a href="/" class="active">Show</a>
+    <a href="/band">Band</a>
+    <a href="/singer">Singer Queue</a>
+    <a href="http://192.168.0.191:3000/hud.html" target="_blank">Stage HUD</a>
+  </div>
+
+  <div class="banner" id="reaperBanner" style="display:none">
+    REAPER: <span id="reaperSong">—</span> &nbsp;|&nbsp;
+    Stage HUD at <span id="reaperIP">192.168.0.191:3000</span>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" onclick="showTab('browse')" id="tabBrowse">Songs</button>
+    <button class="tab" onclick="showTab('queue')" id="tabQueue">Queue <span id="queueCount" class="badge" style="font-size:10px;width:auto;height:auto;padding:0 6px;line-height:18px">0</span></button>
+    <button class="tab" onclick="showTab('singers')" id="tabSingers">Singers <span id="singerCount" class="badge" style="font-size:10px;width:auto;height:auto;padding:0 6px;line-height:18px">0</span></button>
+  </div>
+
+  <div id="browseTab">
+    <div class="search-bar">
+      <input id="searchInput" placeholder="Search songs, artists, keys..." oninput="debouncedSearch()">
+      <div class="flex gap-sm mt-4" style="flex-wrap:wrap">
+        <select id="sortSelect" onchange="doSearch()" style="width:auto;flex:1;min-width:80px">
+          <option value="title">Sort: Title</option>
+          <option value="artist">Sort: Artist</option>
+          <option value="key">Sort: Key</option>
+          <option value="bpm">Sort: BPM</option>
+        </select>
+        <select id="genreFilter" onchange="doSearch()" style="width:auto;flex:1;min-width:80px">
+          <option value="">All Genres</option>
+        </select>
+      </div>
+    </div>
+    <div id="songList"></div>
+    <div id="loadMore" class="text-sm" style="text-align:center;padding:12px;display:none">
+      <button class="btn btn-sm btn-ghost" onclick="loadMoreSongs()">Load more</button>
+    </div>
+  </div>
+
+  <div id="queueTab" style="display:none">
+    <div class="flex-between mb-8">
+      <span id="queueInfo" class="text-sm"></span>
+      <button class="btn btn-sm btn-ghost" onclick="clearQueue()">Clear</button>
+    </div>
+    <div id="queueList"></div>
+  </div>
+
+  <div id="singersTab" style="display:none">
+    <div class="flex-between mb-8">
+      <span id="singerInfo" class="text-sm"></span>
+      <div>
+        <button class="btn btn-sm btn-ghost" onclick="syncExternal()">Sync Ext</button>
+        <button class="btn btn-sm btn-ghost" onclick="clearSingers()">Clear Round</button>
+      </div>
+    </div>
+    <div id="singerList"></div>
+  </div>
+</div>
+
+<script>
+let allSongs = [], filteredSongs = [], currentPage = 1, perPage = 50;
+let queueState = null, singerState = null;
+let searchTimer = null;
+const debouncedSearch = () => { clearTimeout(searchTimer); searchTimer = setTimeout(doSearch, 200); };
+
+async function api(url, opts) {
+  const r = await fetch(url, opts);
+  if (r.status === 401) { window.location.href = '/login.html'; return null; }
+  return r.json();
+}
+
+async function loadSongs() {
+  const r = await api('/api/songs/search?per_page=500');
+  if (!r) return;
+  allSongs = r.songs;
+  filteredSongs = allSongs;
+  renderSongs();
+}
+async function loadGenres() {
+  const r = await api('/api/songs/genres');
+  if (!r) return;
+  const sel = document.getElementById('genreFilter');
+  r.genres.forEach(g => { const o = document.createElement('option'); o.value = g; o.textContent = g; sel.appendChild(o); });
+}
+async function loadQueue() {
+  const r = await api('/api/queue');
+  if (!r) return;
+  queueState = r;
+  document.getElementById('queueCount').textContent = r.main_queue?.length || 0;
+  document.getElementById('queueInfo').textContent = `${r.main_queue?.length || 0} songs`;
+  renderQueue();
+}
+async function loadSingers() {
+  const r = await api('/api/singer/queue');
+  if (!r) return;
+  singerState = r;
+  document.getElementById('singerCount').textContent = r.queue?.length || 0;
+  document.getElementById('singerInfo').textContent = `Round ${r.round} — ${r.queue?.length || 0} singers waiting`;
+  renderSingers();
+}
+
+function doSearch() {
+  const q = document.getElementById('searchInput').value.trim();
+  const sort = document.getElementById('sortSelect').value;
+  const genre = document.getElementById('genreFilter').value;
+  let results = allSongs;
+  if (q) {
+    const lower = q.toLowerCase();
+    results = results.filter(s => s.title.toLowerCase().includes(lower) || s.artist.toLowerCase().includes(lower) || s.key.toLowerCase().includes(lower));
+  }
+  if (genre) results = results.filter(s => s.genres.includes(genre));
+  if (sort === 'title') results.sort((a,b) => a.title.localeCompare(b.title));
+  else if (sort === 'artist') results.sort((a,b) => a.artist.localeCompare(b.artist));
+  else if (sort === 'key') results.sort((a,b) => a.key.localeCompare(b.key));
+  else if (sort === 'bpm') results.sort((a,b) => a.bpm - b.bpm);
+  filteredSongs = results;
+  currentPage = 1;
+  renderSongs();
+}
+function loadMoreSongs() { currentPage++; renderSongs(); }
+
+function renderSongs() {
+  const el = document.getElementById('songList');
+  const page = filteredSongs.slice(0, currentPage * perPage);
+  if (page.length === 0) { el.innerHTML = '<div class="empty-state">No songs found</div>'; return; }
+  el.innerHTML = page.map(s => `
+    <div class="song-item" onclick="addToQueue('${s.slug}')">
+      <div><div class="title">${esc(s.title)}</div><div class="artist">${esc(s.artist)}</div></div>
+      <div style="text-align:right">
+        <div class="text-sm">${esc(s.key)}</div>
+        <div>${s.genres.map(g => `<span class="tag">${g}</span>`).join('')}</div>
+      </div>
+    </div>
+  `).join('');
+  document.getElementById('loadMore').style.display = filteredSongs.length > currentPage * perPage ? 'block' : 'none';
+}
+
+function renderQueue() {
+  const el = document.getElementById('queueList');
+  const q = queueState?.main_queue || [];
+  if (q.length === 0) { el.innerHTML = '<div class="empty-state">Queue is empty — tap a song to add it</div>'; return; }
+  el.innerHTML = q.map((item, i) => `
+    <div class="queue-item">
+      <div class="flex" style="flex:1">
+        <span class="queue-pos">${i+1}.</span>
+        <div>
+          <div>${esc(item.title)}</div>
+          <div class="text-sm">${esc(item.artist)}${item.singer ? ' — '+esc(item.singer) : ''}</div>
+        </div>
+      </div>
+      <button class="btn btn-sm btn-ghost" onclick="removeFromQueue(${i})">X</button>
+    </div>
+  `).join('');
+}
+
+function renderSingers() {
+  const el = document.getElementById('singerList');
+  const q = singerState?.queue || [];
+  if (q.length === 0) { el.innerHTML = '<div class="empty-state">No singers waiting</div>'; return; }
+  el.innerHTML = q.map((e, i) => `
+    <div class="singer-entry">
+      <div>
+        <div style="font-weight:600">${esc(e.singer)}</div>
+        <div class="text-sm">${esc(e.song_title)} — ${esc(e.song_artist)}</div>
+      </div>
+      <div class="flex gap-sm">
+        <button class="btn btn-sm btn-green" onclick="promoteSinger('${e.id}')">+Queue</button>
+        <button class="btn btn-sm btn-ghost" onclick="removeSinger('${e.id}')">X</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function showTab(tab) {
+  document.getElementById('browseTab').style.display = tab === 'browse' ? '' : 'none';
+  document.getElementById('queueTab').style.display = tab === 'queue' ? '' : 'none';
+  document.getElementById('singersTab').style.display = tab === 'singers' ? '' : 'none';
+  document.getElementById('tabBrowse').className = 'tab' + (tab === 'browse' ? ' active' : '');
+  document.getElementById('tabQueue').className = 'tab' + (tab === 'queue' ? ' active' : '');
+  document.getElementById('tabSingers').className = 'tab' + (tab === 'singers' ? ' active' : '');
+}
+
+async function addToQueue(slug) {
+  const r = await api('/api/queue/add', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({slug}) });
+  if (r) { showTab('queue'); loadQueue(); }
+}
+async function removeFromQueue(idx) {
+  await api('/api/queue/item/' + idx, { method:'DELETE' });
+  loadQueue();
+}
+async function clearQueue() {
+  if (!confirm('Clear entire queue?')) return;
+  await api('/api/queue/clear', { method:'POST' });
+  loadQueue();
+}
+async function promoteSinger(id) {
+  await api('/api/singer/promote', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id}) });
+  loadSingers();
+  loadQueue();
+  showTab('queue');
+}
+async function removeSinger(id) {
+  await api('/api/singer/queue/' + id, { method:'DELETE' });
+  loadSingers();
+}
+async function clearSingers() {
+  if (!confirm('Clear all singers for this round?')) return;
+  await api('/api/singer/clear-round', { method:'POST' });
+  loadSingers();
+}
+async function syncExternal() {
+  await api('/api/singer/external-sync', { method:'POST' });
+  loadSingers();
+}
+
+// Check what REAPER is playing from port 3000
+var HUD_HOST = window.location.hostname;
+async function checkReaper() {
+  try {
+    var r = await fetch('http://' + HUD_HOST + ':3000/api/state');
+    if (!r.ok) return;
+    var s = await r.json();
+    var banner = document.getElementById('reaperBanner');
+    if (s.playing || s.currentSong) {
+      banner.style.display = 'block';
+      document.getElementById('reaperSong').textContent = (s.currentSong || '—') + ' (' + (s.currentKey || '?') + ')';
+      document.getElementById('reaperIP').textContent = HUD_HOST + ':3000';
+    }
+  } catch(e) {}
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s || '';
+  return d.innerHTML;
+}
+
+document.getElementById('searchInput').focus();
+loadSongs();
+loadGenres();
+loadQueue();
+loadSingers();
+setInterval(loadQueue, 3000);
+setInterval(loadSingers, 5000);
+setInterval(checkReaper, 5000);
+</script>
+</body></html>

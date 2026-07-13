@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Band View</title>
+<link rel="stylesheet" href="/css/style.css">
+</head><body>
+<div class="container">
+  <div class="nav">
+    <a href="/">Show</a>
+    <a href="/band" class="active">Band</a>
+    <a href="/singer">Singer Queue</a>
+    <a href="#" onclick="openHUD();return false">Stage HUD</a>
+  </div>
+
+  <div class="card" style="text-align:center">
+    <h3 id="bandStatus" style="color:var(--text2)">Singer Queue Manager</h3>
+    <p class="text-sm" style="margin-top:8px;color:var(--text2)">REAPER controls playback. The Stage HUD shows live lyrics.</p>
+  </div>
+
+  <h2 class="mt-8">Singer Requests</h2>
+  <div id="bandQueueList"></div>
+
+  <div class="card mt-8" style="text-align:center">
+    <button class="btn btn-blue" onclick="openHUD()" style="width:100%">Open Stage HUD (Teleprompter)</button>
+    <p class="text-sm mt-8" style="color:var(--text2)">HUD shows live timecode + scrolling lyrics synced with REAPER</p>
+  </div>
+</div>
+
+<script>
+var currentHUDwindow = null;
+
+function openHUD() {
+  var ip = window.location.hostname;
+  var url = 'http://' + ip + ':3000/hud.html';
+  if (currentHUDwindow && !currentHUDwindow.closed) {
+    currentHUDwindow.location.href = url;
+    currentHUDwindow.focus();
+  } else {
+    currentHUDwindow = window.open(url, 'stage_hud', 'width=1280,height=720');
+  }
+}
+
+async function api(url, opts) {
+  try {
+    const r = await fetch(url, opts);
+    if (r.status === 401) return null;
+    return r.json();
+  } catch(e) { return null; }
+}
+
+async function load() {
+  // Show singer queue
+  const sq = await api('/api/singer/queue');
+  if (!sq) return;
+  const el = document.getElementById('bandQueueList');
+  const q = sq.queue || [];
+  document.getElementById('bandStatus').textContent = q.length + ' singers in queue (Round ' + sq.round + ')';
+  if (q.length === 0) { el.innerHTML = '<div class="empty-state">No singers waiting — share the singer QR code!</div>'; return; }
+  el.innerHTML = q.map((item, i) => `
+    <div class="queue-item">
+      <div class="flex" style="flex:1">
+        <span class="queue-pos">${i+1}.</span>
+        <div>
+          <div style="font-weight:600">${esc(item.singer)}</div>
+          <div class="text-sm">${esc(item.song_title)} — ${esc(item.song_artist)}</div>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+load();
+setInterval(load, 5000);
+</script>
+</body></html>

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta http-equiv="refresh" content="0; url=http://HOST_REPLACE:3000/hud.html">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Teleprompter</title>
+<style>
+body{background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,sans-serif;text-align:center;padding:40px}
+h1{color:#f80;font-size:28px;margin-bottom:10px}
+p{color:#aaa;font-size:18px;margin:8px 0}
+a{display:inline-block;background:#ff8800;color:#111;padding:14px 32px;font-size:20px;text-decoration:none;border-radius:8px;margin-top:20px;font-weight:bold}
+</style>
+</head><body>
+<h1>Dell Teleprompter</h1>
+<p>Redirecting to Stage HUD...</p>
+<p><a id="hudLink" href="http://localhost:3000/hud.html">Open Stage HUD</a></p>
+<script>
+(function(){
+  var ip = window.location.hostname;
+  if (ip !== 'localhost' && ip !== '127.0.0.1') {
+    var url = 'http://' + ip + ':3000/hud.html';
+    document.getElementById('hudLink').href = url;
+    window.location.replace(url);
+  } else {
+    window.location.replace('http://localhost:3000/hud.html');
+  }
+})();
+</script>
+</body></html>

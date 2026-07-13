@@ -1,0 +1,44 @@
+#!/bin/bash
+# Generate QR codes for the show
+# Primary URL uses rig.local (mDNS/Bonjour — survives IP changes)
+# Fallback QR uses current IP
+
+OUT_DIR="$HOME/Documents/projects/live-band-karaoke"
+mkdir -p "$OUT_DIR"
+
+BEST_IP=""
+for iface in en0 en1 en2 en3 en4 en5 en6 en7 en8; do
+  ip=$(ipconfig getifaddr "$iface" 2>/dev/null)
+  if [ -n "$ip" ] && [ "$ip" != "127.0.0.1" ]; then
+    [[ "$ip" =~ ^100\. ]] && continue
+    BEST_IP="$ip"
+    if [[ "$ip" =~ ^(10\.0\.|192\.168\.) ]]; then break; fi
+  fi
+done
+[ -z "$BEST_IP" ] && BEST_IP="localhost"
+
+# Primary: rig.local (mDNS — survives IP changes, works on most routers)
+# Fallback: direct IP (works if mDNS blocked by router)
+PRIMARY_URL="http://rig.local:3300/singer"
+FALLBACK_URL="http://${BEST_IP}:3300/singer"
+WIFI_DATA="WIFI:T:WPA;S:placeholder-guest;P:password;H:false;;"
+
+echo "Show IP: $BEST_IP"
+echo "Primary (mDNS): $PRIMARY_URL"
+echo "Fallback (IP):  $FALLBACK_URL"
+
+# QR 1: WiFi join
+python3 -c "import qrcode; qrcode.make('$WIFI_DATA').save('$OUT_DIR/qr-1-join-wifi.png')" 2>/dev/null && echo "  ✓ WiFi QR" || echo "  ✗ WiFi QR failed"
+
+# QR 2: Singer page — rig.local (permanent URL)
+python3 -c "import qrcode; qrcode.make('$PRIMARY_URL').save('$OUT_DIR/qr-2-singer-rig-local.png')" 2>/dev/null && echo "  ✓ Singer QR (rig.local)" || echo "  ✗ Singer QR failed"
+
+# QR 3: Singer page — IP fallback (just in case)
+python3 -c "import qrcode; qrcode.make('$FALLBACK_URL').save('$OUT_DIR/qr-3-singer-ip-fallback.png')" 2>/dev/null && echo "  ✓ Fallback QR ($FALLBACK_URL)" || echo "  ✗ Fallback QR failed"
+
+echo "$PRIMARY_URL" > "$OUT_DIR/singer-url.txt"
+echo "Primary: $PRIMARY_URL" > "$OUT_DIR/singer-urls.txt"
+echo "Fallback: $FALLBACK_URL" >> "$OUT_DIR/singer-urls.txt"
+echo "$FALLBACK_URL" > "$OUT_DIR/tunnel-url.txt"
+
+cd "$OUT_DIR" && git add tunnel-url.txt qr-*.png singer-url*.txt 2>/dev/null && git commit -m "QR: $PRIMARY_URL" 2>/dev/null && git push origin gh-pages 2>/dev/null && echo "  ✓ Deployed" || true

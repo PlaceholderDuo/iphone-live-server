@@ -1,0 +1,23 @@
+{
+  "password": "showtime",
+  "wifi_ssid": "PLACEHOLDER-DUO",
+  "wifi_password": "showtime2025",
+  "whitelist": [],
+  "device_id": "iphone7-danny-01",
+  "tip_url": "https://redfox-music.github.io/tips-or-follow",
+  "server_port": 3300,
+  "reaper_api_url": "http://localhost:3300",
+  "teleprompter_refresh_ms": 1000,
+  "karaoke_enabled": true,
+  "karaoke_paused_message": "Guest singers is paused right now. Follow us @PlaceholderDuo to find our next events - see you again soon!",
+  "devices": {
+    "iphone7-danny-01": {
+      "name": "Danny's iPhone 7",
+      "requires_auth": false
+    },
+    "raspberry-pi-teleprompter": {
+      "name": "Teleprompter Output",
+      "requires_auth": false
+    }
+  }
+}

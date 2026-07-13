@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Login - Live Show</title>
+<link rel="stylesheet" href="/css/style.css">
+</head><body>
+<div class="container" style="max-width:360px;padding-top:60px">
+  <div class="card" style="text-align:center">
+    <h2 style="margin-bottom:20px">Live Show Control</h2>
+    <input id="password" type="password" placeholder="Password" autocomplete="off" value="showtime" style="text-align:center;font-size:20px;letter-spacing:4px">
+    <button class="btn" style="width:100%;margin-top:12px" onclick="login()">Unlock</button>
+    <p class="text-sm mt-8" style="color:#555">Password: showtime</p>
+    <p id="error" class="text-sm mt-8" style="color:var(--red);display:none"></p>
+  </div>
+</div>
+<script>
+async function login() {
+  const pw = document.getElementById('password').value;
+  const err = document.getElementById('error');
+  if (!pw) { err.textContent='Enter password'; err.style.display='block'; return; }
+  try {
+    const r = await fetch('/api/auth/login', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({password: pw})
+    });
+    if (r.ok) { window.location.href = '/'; }
+    else { const d = await r.json(); err.textContent = d.error || 'Wrong password'; err.style.display='block'; }
+  } catch(e) { err.textContent = 'Connection error'; err.style.display='block'; }
+}
+document.getElementById('password').addEventListener('keydown', e => { if(e.key==='Enter') login(); });
+document.getElementById('password').focus();
+</script>
+</body></html>

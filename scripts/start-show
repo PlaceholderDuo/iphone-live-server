@@ -1,0 +1,122 @@
+#!/bin/bash
+# start-show — Launch the live show rig
+# Usage:
+#   start-show connect   — infra + TUI (no Dell HUD)
+#   start-show live      — infra + TUI + Dell HUD auto-launch
+#   start-show           — defaults to live
+
+set +e
+
+MODE="${1:-live}"
+
+case "$MODE" in
+  connect) TUI_FLAG="--connect"; MODE_LABEL="CONNECT"; DELL_LABEL="standby — press [s] in TUI to go live";;
+  live)    TUI_FLAG="--live";    MODE_LABEL="LIVE";    DELL_LABEL="auto-kiosk → http://\${SHOW_IP}:3000/hud.html";;
+  *) echo "Usage: start-show {connect|live}"; exit 1;;
+esac
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+TUI_SCRIPT="$SCRIPT_DIR/tui.js"
+LSM_DIR="$HOME/Library/Application Support/REAPER/Scripts/Live Show Manager/web"
+
+MAIN_STARTED=false
+
+# Get MacBook IP
+_my_ip() {
+  local ip
+  ip=$(ifconfig en0 2>/dev/null | grep 'inet ' | awk '{print $2}' | head -1)
+  if [ -z "$ip" ] || [ "$ip" = "127.0.0.1" ]; then
+    for iface in en1 en2 en3 en4; do
+      ip=$(ifconfig "$iface" 2>/dev/null | grep 'inet ' | awk '{print $2}' | head -1)
+      [ -n "$ip" ] && [ "$ip" != "127.0.0.1" ] && break
+    done
+  fi
+  echo "${ip:-127.0.0.1}"
+}
+
+cleanup() {
+  echo ""
+  echo "♪ Shutting down..."
+
+  if $MAIN_STARTED; then
+    lsof -ti:3300 2>/dev/null | xargs kill -9 2>/dev/null || true
+    echo "  Singer server stopped"
+  fi
+
+  echo "♪ All clear."
+}
+trap cleanup EXIT INT TERM
+
+SHOW_IP=$(_my_ip)
+export SHOW_IP
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo " ♪ LIVE SHOW RIG — ${MODE_LABEL}"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  MacBook:  ${SHOW_IP}"
+echo "  Mode:     ${MODE_LABEL}"
+echo ""
+
+# ─── LSM Bridge (:3000) — managed by launchd ──────
+if curl -sf http://localhost:3000/api/state > /dev/null 2>&1; then
+  echo "● LSM Bridge: running on :3000 (launchd)"
+else
+  echo "♪ Starting LSM Bridge on :3000..."
+  launchctl load "$LSM_DIR/com.liveshowmanager.bridge.plist" 2>/dev/null
+  sleep 2
+  if curl -sf http://localhost:3000/api/state > /dev/null 2>&1; then
+    echo "  ✓ LSM Bridge started"
+  else
+    echo "  ⚠ LSM Bridge failed — starting manually..."
+    cd "$LSM_DIR"
+    node server.js &
+    cd "$PROJECT_DIR"
+    sleep 2
+  fi
+fi
+
+# ─── Singer Server (:3300) ─────────────────────────
+cd "$PROJECT_DIR" || { echo "Error: can't cd to $PROJECT_DIR"; exit 1; }
+if curl -sf http://localhost:3300/api/health > /dev/null 2>&1; then
+  echo "● Singer server: running on :3300"
+else
+  echo "♪ Starting singer server on :3300..."
+  if [ ! -d "node_modules" ]; then
+    npm install --silent 2>/dev/null
+  fi
+  node server/index.js &
+  sleep 1
+  if curl -sf http://localhost:3300/api/health > /dev/null 2>&1; then
+    echo "  ✓ Singer server started"
+    MAIN_STARTED=true
+  else
+    echo "  ⚠ Singer server may have failed"
+  fi
+fi
+
+echo ""
+
+# ─── QR Codes ──────────────────────────────────────
+bash "$SCRIPT_DIR/generate-qr" 2>/dev/null
+
+# ─── Summary ───────────────────────────────────────
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  ALL SERVERS LIVE — ${MODE_LABEL}"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  iPhone + HUD:    http://${SHOW_IP}:3000/"
+echo "  Stage HUD:       http://${SHOW_IP}:3000/hud.html"
+echo "  Singer Queue:    http://${SHOW_IP}:3300/singer"
+echo "  Singer Manager:  http://${SHOW_IP}:3300/  (pass: showtime)"
+echo "  Band View:       http://${SHOW_IP}:3300/band"
+echo ""
+echo "  Dell (rdfx5):    ${DELL_LABEL}"
+echo "  Pass: showtime"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+echo "♪ Launching TUI (Ctrl-C to stop everything)..."
+echo ""
+
+node "$TUI_SCRIPT" "$TUI_FLAG"
+# Cleanup runs via trap EXIT above
