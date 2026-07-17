@@ -1,29 +1,230 @@
 <!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8">
-<meta http-equiv="refresh" content="0; url=http://HOST_REPLACE:3000/hud.html">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>Teleprompter</title>
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="theme-color" content="#000000">
+<title>Teleprompter — Placeholder Duo</title>
 <style>
-body{background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,sans-serif;text-align:center;padding:40px}
-h1{color:#f80;font-size:28px;margin-bottom:10px}
-p{color:#aaa;font-size:18px;margin:8px 0}
-a{display:inline-block;background:#ff8800;color:#111;padding:14px 32px;font-size:20px;text-decoration:none;border-radius:8px;margin-top:20px;font-weight:bold}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  width: 100%; height: 100%; overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #000; color: #fff;
+  -webkit-font-smoothing: antialiased;
+  user-select: none; cursor: none;
+}
+.layout {
+  display: flex; flex-direction: column;
+  width: 100%; height: 100%; padding: 3vh 4vw;
+}
+.top-bar {
+  display: flex; justify-content: space-between; align-items: center;
+  padding-bottom: 2vh; border-bottom: 1px solid #1a1a1a; margin-bottom: 2vh;
+}
+.top-left { display: flex; align-items: baseline; gap: 16px; }
+.top-left .title { font-size: 5vh; font-weight: 800; }
+.top-left .artist { font-size: 2.5vh; color: #f0883e; font-weight: 600; }
+.top-right { display: flex; gap: 12px; align-items: center; }
+.pill {
+  padding: 6px 16px; border-radius: 20px; font-size: 1.8vh; font-weight: 600;
+  border: 1px solid #333;
+}
+.pill.key { color: #2ecc71; border-color: #2ecc71; }
+.pill.bpm { color: #3498db; border-color: #3498db; }
+.status-badge {
+  padding: 6px 16px; border-radius: 20px; font-size: 1.8vh; font-weight: 700;
+}
+.status-badge.playing { background: #2ecc71; color: #000; animation: pulse 2s infinite; }
+.status-badge.loaded { background: #f0883e; color: #000; }
+.status-badge.stopped { background: #333; color: #666; }
+@keyframes pulse { 50% { opacity: .6; } }
+
+.main {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; min-height: 0;
+}
+.lyric-line {
+  font-size: 6vh; font-weight: 600; line-height: 1.4; max-width: 85vw;
+  color: #fff; transition: opacity .3s;
+}
+.lyric-line .chord {
+  color: #f0883e; font-weight: 800; font-size: 6.5vh;
+}
+.note-text {
+  font-size: 2.5vh; color: #666; margin-top: 2vh; max-width: 60vw;
+}
+.idle-msg {
+  font-size: 4vh; color: #333; font-weight: 600;
+}
+.empty { color: #222; }
+
+.footer {
+  padding-top: 2vh; border-top: 1px solid #1a1a1a; margin-top: 2vh;
+  display: flex; gap: 8px; align-items: center; overflow: hidden;
+}
+.footer-label {
+  font-size: 1.4vh; color: #555; text-transform: uppercase; letter-spacing: 1px;
+  flex-shrink: 0; margin-right: 8px;
+}
+.queue-item {
+  font-size: 1.8vh; color: #555; padding: 4px 12px;
+  border: 1px solid #1a1a1a; border-radius: 8px; flex-shrink: 0;
+}
+.queue-item.next { color: #f0883e; border-color: #f0883e; font-weight: 600; }
+.queue-item .qtitle { font-weight: 600; }
 </style>
 </head><body>
-<h1>Teleprompter Moved</h1>
-<p>Redirecting to Stage HUD...</p>
-<p><a id="hudLink" href="http://localhost:3000/hud.html">Open Stage HUD</a></p>
+
+<div class="layout">
+  <div class="top-bar">
+    <div class="top-left">
+      <div class="title" id="songTitle">No song loaded</div>
+      <div class="artist" id="songArtist"></div>
+    </div>
+    <div class="top-right">
+      <span class="pill key" id="songKey"></span>
+      <span class="pill bpm" id="songBpm"></span>
+      <span class="status-badge stopped" id="statusBadge">Stopped</span>
+    </div>
+  </div>
+
+  <div class="main" id="mainArea">
+    <div class="idle-msg" id="idleMsg">Waiting for show to start...</div>
+  </div>
+
+  <div class="footer" id="queueStrip">
+    <span class="footer-label">Up Next</span>
+  </div>
+</div>
+
 <script>
-(function(){
-  var ip = window.location.hostname;
-  if (ip !== 'localhost' && ip !== '127.0.0.1') {
-    var url = 'http://' + ip + ':3000/hud.html';
-    document.getElementById('hudLink').href = url;
-    window.location.replace(url);
-  } else {
-    window.location.replace('http://localhost:3000/hud.html');
+(function() {
+  var POLL = 2000;
+  var lastSlug = null;
+
+  function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  function hms() { return ''; }
+
+  async function api(url) {
+    try { var r = await fetch(url); return r.json(); }
+    catch(e) { return null; }
   }
+
+  async function poll() {
+    var state = await api('/api/queue/current');
+    if (!state) return;
+    var song = state.current_song;
+    var status = state.status;
+
+    // Status badge
+    var badge = document.getElementById('statusBadge');
+    badge.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+    badge.className = 'status-badge ' + status;
+
+    if (!song) {
+      document.getElementById('songTitle').textContent = 'No song loaded';
+      document.getElementById('songArtist').textContent = '';
+      document.getElementById('songKey').textContent = '';
+      document.getElementById('songBpm').textContent = '';
+      document.getElementById('idleMsg').textContent = 'Waiting for show to start...';
+      document.getElementById('idleMsg').style.display = '';
+      return;
+    }
+
+    // Update header
+    document.getElementById('songTitle').textContent = song.title;
+    document.getElementById('songArtist').textContent = song.artist || '';
+    document.getElementById('songKey').textContent = song.key || '';
+    document.getElementById('songBpm').textContent = '\u2669' + (song.bpm || '');
+
+    // Fetch full song data for lyrics
+    if (song.slug !== lastSlug) {
+      lastSlug = song.slug;
+      loadSongLyrics(song.slug);
+    }
+
+    // Update status-based message
+    var msg = document.getElementById('idleMsg');
+    if (status === 'playing') {
+      msg.style.display = 'none';
+    } else if (status === 'loaded') {
+      msg.textContent = 'Loaded — press Play to start';
+      msg.style.display = '';
+    }
+
+    // Queue strip
+    loadQueueStrip();
+  }
+
+  async function loadSongLyrics(slug) {
+    try {
+      var r = await fetch('/api/songs/' + encodeURIComponent(slug));
+      if (!r.ok) return;
+      var data = await r.json();
+      var meta = data.meta;
+      if (!meta) return;
+
+      var main = document.getElementById('mainArea');
+      main.innerHTML = '';
+
+      if (meta.lyrics && Array.isArray(meta.lyrics) && meta.lyrics.length > 0) {
+        meta.lyrics.forEach(function(l) {
+          var div = document.createElement('div');
+          div.className = 'lyric-line';
+          // Highlight chords with [brackets]
+          var text = esc(l.text || '');
+          text = text.replace(/\[([^\]]+)\]/g, '<span class="chord">$1</span>');
+          div.innerHTML = text;
+          if (text.trim()) main.appendChild(div);
+        });
+      }
+
+      if (meta.notes) {
+        var note = document.createElement('div');
+        note.className = 'note-text';
+        note.textContent = meta.notes;
+        main.appendChild(note);
+      }
+
+      if (main.children.length === 0) {
+        var empty = document.createElement('div');
+        empty.className = 'idle-msg';
+        empty.textContent = 'No lyrics available for this song';
+        main.appendChild(empty);
+      }
+
+      // Scroll to top
+      main.scrollTop = 0;
+    } catch(e) {}
+  }
+
+  async function loadQueueStrip() {
+    var strip = document.getElementById('queueStrip');
+    var r = await api('/api/queue');
+    if (!r || !r.main_queue) {
+      strip.innerHTML = '<span class="footer-label">Up Next</span>';
+      return;
+    }
+    var queue = r.main_queue;
+    var current = r.current_index;
+    var upcoming = queue.slice(current + 1, current + 4);
+    if (upcoming.length === 0) {
+      strip.innerHTML = '<span class="footer-label">Up Next</span><span class="queue-item empty">End of queue</span>';
+      return;
+    }
+    var html = '<span class="footer-label">Up Next</span>';
+    upcoming.forEach(function(s, i) {
+      html += '<div class="queue-item' + (i === 0 ? ' next' : '') + '">' +
+        '<span class="qtitle">' + esc(s.title) + '</span>' +
+        (s.artist ? ' ' + esc(s.artist) : '') +
+        '</div>';
+    });
+    strip.innerHTML = html;
+  }
+
+  poll();
+  setInterval(poll, POLL);
 })();
 </script>
 </body></html>

@@ -9,7 +9,8 @@ const QUEUE_PATH = path.join(DATA_DIR, 'queue.json');
 function defaultQueue() {
   return {
     main_queue: [],
-    singer_queue: [],
+    active_rotation: [],
+    waiting_list: [],
     band_queue: [],
     current_index: -1,
     status: 'stopped',
@@ -66,7 +67,7 @@ function queueRoutes(app) {
       has_prev: q.current_index > 0,
       is_at_end: q.main_queue.length > 0 && q.current_index >= q.main_queue.length - 1,
       eta_minutes: Math.max(0, remaining * MINUTES_PER_SONG),
-      singer_eta_minutes: (q.singer_queue || []).length * MINUTES_PER_SONG
+      singer_eta_minutes: (q.active_rotation || []).length * MINUTES_PER_SONG
     });
   });
 
@@ -224,18 +225,7 @@ function queueRoutes(app) {
     res.json({ ok: true, song: firstSong, index: 0 });
   });
 
-  // Singer queue endpoints
-  app.get('/api/singer/queue', (req, res) => {
-    const q = loadQueue();
-    const MINUTES_PER_SONG = 5;
-    res.json({
-      queue: q.singer_queue,
-      round: q.round,
-      promote_count: q.promote_count || 0,
-      eta_minutes: q.singer_queue.length * MINUTES_PER_SONG,
-      band_playing: q.current_song?.band_song || false
-    });
-  });
+  // ─── Singer queue endpoints (PCDJ two-queue: active_rotation + waiting_list) ───
 
   app.get('/api/singer/status', (req, res) => {
     const cfg = authApi.loadConfig();
@@ -250,6 +240,21 @@ function queueRoutes(app) {
     cfg.karaoke_enabled = cfg.karaoke_enabled === false;
     authApi.saveConfig(cfg);
     res.json({ karaoke_enabled: cfg.karaoke_enabled });
+  });
+
+  app.get('/api/singer/queue', (req, res) => {
+    const q = loadQueue();
+    const allActive = [...(q.active_rotation || [])];
+    const allWaiting = [...(q.waiting_list || [])];
+    const MINUTES_PER_SONG = 5;
+    res.json({
+      active_rotation: allActive,
+      waiting_list: allWaiting,
+      round: q.round,
+      promote_count: q.promote_count || 0,
+      eta_minutes: allActive.length * MINUTES_PER_SONG,
+      total_singers: allActive.length + allWaiting.length
+    });
   });
 
   app.post('/api/singer/add', (req, res) => {
@@ -271,11 +276,15 @@ function queueRoutes(app) {
     if (q.banned_singers && q.banned_singers.includes(trimmedSinger)) {
       return res.status(403).json({ error: 'Thanks for singing! Have a great night!' });
     }
-    const mySongs = q.singer_queue.filter(e => e.singer === trimmedSinger && e.round === q.round);
-    if (mySongs.length >= 2) {
+    if (!q.active_rotation) q.active_rotation = [];
+    if (!q.waiting_list) q.waiting_list = [];
+    // Count singer's total songs across both queues
+    const totalSongs = [...q.active_rotation, ...q.waiting_list]
+      .filter(e => e.singer === trimmedSinger).length;
+    if (totalSongs >= 2) {
       return res.status(400).json({ error: 'You already have 2 songs in the queue' });
     }
-    q.singer_queue.push({
+    const entry = {
       id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
       singer: trimmedSinger,
       song_slug,
@@ -284,10 +293,12 @@ function queueRoutes(app) {
       timestamp: Date.now(),
       round: q.round,
       ip: req.ip || req.socket?.remoteAddress || 'unknown'
-    });
+    };
+    // New singers go to waiting_list (FIFO)
+    q.waiting_list.push(entry);
     saveQueue(q);
-    const position = q.singer_queue.filter(e => e.singer === trimmedSinger && e.round === q.round).length - 1;
-    res.json({ ok: true, position: q.singer_queue.length - 1 });
+    const pos = q.waiting_list.length;
+    res.json({ ok: true, position: pos, list: 'waiting' });
   });
 
   app.post('/api/singer/change', (req, res) => {
@@ -296,17 +307,23 @@ function queueRoutes(app) {
     const info = songsApi.getSong(song_slug);
     if (!info || !info.meta) return res.status(400).json({ error: 'Song not found' });
     const q = loadQueue();
-    const entry = q.singer_queue.find(e => e.id === id);
+    // Search both queues
+    let entry = (q.active_rotation || []).find(e => e.id === id)
+      || (q.waiting_list || []).find(e => e.id === id);
     if (!entry) return res.status(400).json({ error: 'Entry not found' });
-    const position = q.singer_queue.indexOf(entry);
-    if (position < 3) {
-      return res.status(400).json({ locked: true, error: 'Sorry, your song cannot be changed at this time. Songs are locked-in once you are 3rd in the queue.' });
+    // Lock-in: only apply to active_rotation positions < 3
+    const isActive = (q.active_rotation || []).some(e => e.id === id);
+    if (isActive) {
+      const pos = q.active_rotation.indexOf(entry);
+      if (pos >= 0 && pos < 3) {
+        return res.status(400).json({ locked: true, error: 'Sorry, your song cannot be changed at this time. Songs are locked-in once you are 3rd in the queue.' });
+      }
     }
     entry.song_slug = song_slug;
     entry.song_title = info.meta.title || song_slug;
     entry.song_artist = info.meta.artist || 'Unknown';
     saveQueue(q);
-    res.json({ ok: true, entry });
+    res.json({ ok: true, entry, list: isActive ? 'active' : 'waiting' });
   });
 
   app.post('/api/singer/leave', (req, res) => {
@@ -314,56 +331,107 @@ function queueRoutes(app) {
     if (!singer || !singer.trim()) return res.status(400).json({ error: 'Singer name required' });
     const trimmedSinger = singer.trim();
     const q = loadQueue();
-    const removed = q.singer_queue.filter(e => e.singer === trimmedSinger && e.round === q.round);
-    q.singer_queue = q.singer_queue.filter(e => e.singer !== trimmedSinger || e.round !== q.round);
+    let removed = 0;
+    if (q.active_rotation) {
+      const activeRemoved = q.active_rotation.filter(e => e.singer === trimmedSinger);
+      q.active_rotation = q.active_rotation.filter(e => e.singer !== trimmedSinger);
+      removed += activeRemoved.length;
+    }
+    if (q.waiting_list) {
+      const waitingRemoved = q.waiting_list.filter(e => e.singer === trimmedSinger);
+      q.waiting_list = q.waiting_list.filter(e => e.singer !== trimmedSinger);
+      removed += waitingRemoved.length;
+    }
     saveQueue(q);
-    res.json({ ok: true, removed: removed.length });
+    res.json({ ok: true, removed });
   });
 
   app.delete('/api/singer/queue/:id', (req, res) => {
     const q = loadQueue();
-    const idx = q.singer_queue.findIndex(e => e.id === req.params.id);
-    if (idx < 0) return res.status(400).json({ error: 'Entry not found' });
-    q.singer_queue.splice(idx, 1);
+    let found = false;
+    if (q.active_rotation) {
+      const idx = q.active_rotation.findIndex(e => e.id === req.params.id);
+      if (idx >= 0) { q.active_rotation.splice(idx, 1); found = true; }
+    }
+    if (!found && q.waiting_list) {
+      const idx = q.waiting_list.findIndex(e => e.id === req.params.id);
+      if (idx >= 0) { q.waiting_list.splice(idx, 1); found = true; }
+    }
+    if (!found) return res.status(400).json({ error: 'Entry not found' });
     saveQueue(q);
     res.json({ ok: true });
   });
 
-  app.post('/api/singer/clear-round', (req, res) => {
+  // Start a new round: promote 1–2 from waiting_list → active_rotation
+  app.post('/api/singer/start-round', (req, res) => {
     const q = loadQueue();
-    q.singer_queue = q.singer_queue.filter(e => e.round !== q.round);
-    q.promote_count = 0;
-    if (!q.band_queue) q.band_queue = [];
-    let promotedBand = null;
-    if (q.band_queue.length > 0) {
-      promotedBand = promoteBandSong(q);
-    }
+    if (!q.active_rotation) q.active_rotation = [];
+    if (!q.waiting_list) q.waiting_list = [];
+    const count = Math.min(2, q.waiting_list.length);
+    const promoted = q.waiting_list.splice(0, count);
+    q.active_rotation.push(...promoted);
     q.round++;
+    if (q.promote_count === undefined) q.promote_count = 0;
+    q.promote_count += count;
     saveQueue(q);
-    res.json({ ok: true, round: q.round, band_promoted: promotedBand });
+    res.json({ ok: true, promoted: promoted.length, round: q.round,
+      active: q.active_rotation.length, waiting: q.waiting_list.length });
   });
 
+  // Mark a singer as complete (finished performing) — remove from active_rotation
+  app.post('/api/singer/complete/:id', (req, res) => {
+    const q = loadQueue();
+    if (!q.active_rotation) q.active_rotation = [];
+    const idx = q.active_rotation.findIndex(e => e.id === req.params.id);
+    if (idx < 0) return res.status(400).json({ error: 'Entry not found in active rotation' });
+    const completed = q.active_rotation.splice(idx, 1)[0];
+    saveQueue(q);
+    res.json({ ok: true, completed, remaining: q.active_rotation.length });
+  });
+
+  // Wipe both queues and start fresh
+  app.post('/api/singer/clear-round', (req, res) => {
+    const q = loadQueue();
+    q.active_rotation = [];
+    q.waiting_list = [];
+    q.promote_count = 0;
+    q.round = 1;
+    saveQueue(q);
+    res.json({ ok: true, round: q.round });
+  });
+
+  // Kick/ban a singer
   app.post('/api/singer/kick', (req, res) => {
     const { singer } = req.body || {};
     if (!singer || !singer.trim()) return res.status(400).json({ error: 'Singer name required' });
     const trimmedSinger = singer.trim();
     const q = loadQueue();
     if (!q.banned_singers) q.banned_singers = [];
-    // Already banned?
     if (q.banned_singers.includes(trimmedSinger)) {
-      // Remove any remaining songs
-      const remaining = q.singer_queue.filter(e => e.singer === trimmedSinger);
-      q.singer_queue = q.singer_queue.filter(e => e.singer !== trimmedSinger);
+      let remaining = 0;
+      if (q.active_rotation) {
+        remaining += q.active_rotation.filter(e => e.singer === trimmedSinger).length;
+        q.active_rotation = q.active_rotation.filter(e => e.singer !== trimmedSinger);
+      }
+      if (q.waiting_list) {
+        remaining += q.waiting_list.filter(e => e.singer === trimmedSinger).length;
+        q.waiting_list = q.waiting_list.filter(e => e.singer !== trimmedSinger);
+      }
       saveQueue(q);
-      return res.json({ ok: true, removed: remaining.length, already_banned: true });
+      return res.json({ ok: true, removed: remaining, already_banned: true });
     }
-    const entries = q.singer_queue.filter(e => e.singer === trimmedSinger);
+    let entries = [];
+    if (q.active_rotation) {
+      entries = entries.concat(q.active_rotation.filter(e => e.singer === trimmedSinger));
+      q.active_rotation = q.active_rotation.filter(e => e.singer !== trimmedSinger);
+    }
+    if (q.waiting_list) {
+      entries = entries.concat(q.waiting_list.filter(e => e.singer === trimmedSinger));
+      q.waiting_list = q.waiting_list.filter(e => e.singer !== trimmedSinger);
+    }
     if (entries.length === 0) return res.status(404).json({ error: 'Singer not found in queue' });
     q.banned_singers.push(trimmedSinger);
-    q.singer_queue = q.singer_queue.filter(e => e.singer !== trimmedSinger);
     saveQueue(q);
-    // Log to persistent banned log
-    logBanned(trimmedSinger, entries);
     res.json({ ok: true, removed: entries.length, singer: trimmedSinger });
   });
 
@@ -371,18 +439,16 @@ function queueRoutes(app) {
     const q = loadQueue();
     res.json({ banned: q.banned_singers || [] });
   });
-  app.get('/api/singer/banned', (req, res) => {
-    const q = loadQueue();
-    res.json({ banned: q.banned_singers || [] });
-  });
 
+  // Promote: move specific singer from waiting_list → main_queue
   app.post('/api/singer/promote', (req, res) => {
     const { id } = req.body || {};
     if (!id) return res.status(400).json({ error: 'id required' });
     const q = loadQueue();
-    const idx = q.singer_queue.findIndex(e => e.id === id);
-    if (idx < 0) return res.status(400).json({ error: 'Entry not found' });
-    const item = q.singer_queue.splice(idx, 1)[0];
+    if (!q.waiting_list) q.waiting_list = [];
+    const idx = q.waiting_list.findIndex(e => e.id === id);
+    if (idx < 0) return res.status(400).json({ error: 'Entry not found in waiting list' });
+    const item = q.waiting_list.splice(idx, 1)[0];
     q.main_queue.push({
       slug: item.song_slug,
       title: item.song_title,
@@ -392,15 +458,8 @@ function queueRoutes(app) {
     });
     if (q.promote_count === undefined) q.promote_count = 0;
     q.promote_count++;
-    const cfg = authApi.loadConfig();
-    const maxBetween = cfg.max_songs_between_band || 999;
-    const remainingSingers = q.singer_queue.filter(e => e.round === q.round).length;
-    let bandPromoted = null;
-    if (q.promote_count >= maxBetween && remainingSingers > 0 && q.band_queue && q.band_queue.length > 0) {
-      bandPromoted = promoteBandSong(q);
-    }
     saveQueue(q);
-    res.json({ ok: true, promoted: item, band_promoted: bandPromoted, promote_count: q.promote_count });
+    res.json({ ok: true, promoted: item, promote_count: q.promote_count });
   });
 
   app.get('/api/queue/current', (req, res) => {
@@ -559,7 +618,8 @@ function queueRoutes(app) {
             if (name.length > 30) continue;
             const songTitle = (item.song || '').trim();
             if (!songTitle) continue;
-            q.singer_queue.push({
+            if (!q.waiting_list) q.waiting_list = [];
+            q.waiting_list.push({
               id: 'ext-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 5),
               singer: name, song_slug: '', song_title: songTitle,
               song_artist: (item.artist || '').trim(), timestamp: item.time || Date.now(),
@@ -589,15 +649,15 @@ function queueRoutes(app) {
 
   app.post('/api/singer/external-sync', (req, res) => {
     syncBlobToQueue(function(added) {
-      res.json({ ok: true, added: added, total: loadQueue().singer_queue.length, last_sync: lastExternalSync });
+      res.json({ ok: true, added: added,       total: loadQueue().waiting_list.length, last_sync: lastExternalSync });
     });
   });
 
   app.get('/api/singer/external-status', (req, res) => {
     const q = loadQueue();
     res.json({
-      external_pending: q.singer_queue.filter(e => e.external && e.round === q.round).length,
-      total_pending: q.singer_queue.filter(e => e.round === q.round).length,
+      external_pending: (q.waiting_list || []).filter(e => e.external).length,
+      total_pending: (q.active_rotation || []).length + (q.waiting_list || []).length,
       last_sync: lastExternalSync, sync_enabled: externalEnabled,
       online_detected: onlineDetected,
       blob_url: EXTERNAL_BLOB_URL
@@ -635,14 +695,15 @@ function queueRoutes(app) {
     if (q.banned_singers && q.banned_singers.includes(trimmedSinger)) {
       return res.status(403).json({ error: 'Thanks for singing! Have a great night!' });
     }
-    q.singer_queue.push({
+    if (!q.waiting_list) q.waiting_list = [];
+    q.waiting_list.push({
       id: 'ext-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 5),
       singer: trimmedSinger, song_slug: '', song_title: trimmedTitle,
       song_artist: trimmedArtist, timestamp: Date.now(), round: q.round, external: true,
       ip: req.ip || req.socket?.remoteAddress || 'unknown'
     });
     saveQueue(q);
-    res.json({ ok: true, position: q.singer_queue.length });
+    res.json({ ok: true, position: q.waiting_list.length });
   });
 
   // Auto-sync will be started if online detected

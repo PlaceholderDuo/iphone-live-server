@@ -35,6 +35,7 @@ let externalStatus = { external_pending: 0, total_pending: 0, sync_enabled: true
 let logs = [];
 let songCache = [];
 let karaokeEnabled = true;
+let hudReaperPlaying = false;
 let karaokePausedMsg = '';
 
 let focus = 'main';
@@ -309,6 +310,25 @@ function bumperPost(action) {
   });
 }
 
+function hudPost(action) {
+  return new Promise((resolve) => {
+    const data = JSON.stringify({});
+    const opts = {
+      hostname: 'localhost', port: 3000, path: '/api/local/' + action,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) }
+    };
+    const req = http.request(opts, (res) => {
+      let d = '';
+      res.on('data', c => d += c);
+      res.on('end', () => { try { resolve(JSON.parse(d)); } catch { resolve(null); } });
+    });
+    req.on('error', () => resolve(null));
+    req.write(data);
+    req.end();
+  });
+}
+
 function adjustBumperVolume(target) {
   const step = target > bumperVolume ? 'vol-up' : 'vol-down';
   const steps = Math.abs(target - bumperVolume) / 5;
@@ -509,6 +529,9 @@ function render() {
   } else {
     out += drawText(ct + 2, 3, DIM + 'REAPER not connected' + RESET);
     out += drawText(ct + 3, 3, DIM + 'Start REAPER + load show project' + RESET);
+    // Show local HUD playback status
+    const hudStatus = hudReaperPlaying ? (GREEN + '● HUD PLAYING (local)' + RESET) : (YELLOW + '○ HUD stopped' + RESET);
+    out += drawText(ct + 4, 3, hudStatus + '  ' + DIM + 'P=play/pause N=next B=prev' + RESET);
     if (npHighlight) out += drawText(ct + 5, 3, DIM + '(→ to queue panel)' + RESET);
   }
 
@@ -1199,11 +1222,42 @@ function handleInput(chunk) {
         if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode)
           doAction('prev');
         break;
-      case 0x20: // Space — play/stop
+      case 0x20: // Space — play/stop queue AND HUD
         if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode) {
-          if (queueState.status === 'playing') doAction('stop');
-          else if (queueState.current_song) doAction('play');
-          else doAction('start');
+          if (queueState.status === 'playing') {
+            doAction('stop');
+            hudPost('pause');
+          } else if (queueState.current_song) {
+            doAction('play');
+            hudPost('play');
+          } else {
+            doAction('start');
+            hudPost('play');
+          }
+        }
+        break;
+      case 0x50: // Shift+P — HUD play/pause toggle
+        if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode) {
+          hudReaperPlaying = !hudReaperPlaying;
+          hudPost(hudReaperPlaying ? 'play' : 'pause');
+          statusMsg = hudReaperPlaying ? 'HUD playing' : 'HUD paused';
+        }
+        break;
+      case 0x4E: // Shift+N — HUD next song
+        if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode) {
+          hudPost('next').then(() => { statusMsg = 'HUD: next song'; });
+        }
+        break;
+      case 0x42: // Shift+B — HUD prev song
+        if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode) {
+          hudPost('prev').then(() => { statusMsg = 'HUD: prev song'; });
+        }
+        break;
+      case 0x53: // Shift+S — HUD stop
+        if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode) {
+          hudPost('stop');
+          hudReaperPlaying = false;
+          statusMsg = 'HUD stopped';
         }
         break;
       case 0x0D: // Enter — play on the fly (setlist view only)

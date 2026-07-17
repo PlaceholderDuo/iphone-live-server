@@ -3,10 +3,19 @@ const path = require('path');
 
 const SONGS_DIR = path.resolve(process.env.HOME, 'ReaperSongs');
 const GENRE_MAP_PATH = path.resolve(__dirname, '..', '..', 'data', 'genre-map.json');
+const KEY_FALLBACK_PATH = path.resolve(__dirname, '..', '..', 'data', 'key-fallback.json');
 
 function loadGenreMap() {
   try {
     return JSON.parse(fs.readFileSync(GENRE_MAP_PATH, 'utf-8'));
+  } catch {
+    return {};
+  }
+}
+
+function loadKeyFallback() {
+  try {
+    return JSON.parse(fs.readFileSync(KEY_FALLBACK_PATH, 'utf-8'));
   } catch {
     return {};
   }
@@ -19,7 +28,7 @@ function slugify(name) {
 function listSongs() {
   if (!fs.existsSync(SONGS_DIR)) return [];
   return fs.readdirSync(SONGS_DIR, { withFileTypes: true })
-    .filter(e => e.isDirectory())
+    .filter(e => e.isDirectory() && !e.name.startsWith('.') && !e.name.startsWith('_'))
     .map(e => ({ slug: e.name, path: path.join(SONGS_DIR, e.name) }));
 }
 
@@ -36,23 +45,37 @@ function getSong(slug) {
 function buildSongIndex() {
   const entries = listSongs();
   const genreMap = loadGenreMap();
-  return entries.map(entry => {
-    const info = getSong(entry.slug);
-    const m = info?.meta || {};
-    const slug = slugify(m.title || entry.slug);
-    return {
-      slug: entry.slug,
-      title: m.title || entry.slug,
-      artist: m.artist || 'Unknown',
-      bpm: m.bpm || 0,
-      key: m.key || '',
-      genres: genreMap[slug] || genreMap[entry.slug] || [],
-      tuning: m.tuning || '',
-      capo: m.capo || '',
-      difficulty: m.difficulty || '',
-      duration_bars: m.duration_bars || 0
-    };
-  });
+  const keyFallback = loadKeyFallback();
+  const seen = new Set();
+  return entries
+    .filter(entry => {
+      const metaPath = path.join(entry.path, 'meta.json');
+      return fs.existsSync(metaPath);
+    })
+    .map(entry => {
+      const info = getSong(entry.slug);
+      const m = info?.meta || {};
+      const slug = slugify(m.title || entry.slug);
+      const fallbackKey = keyFallback[(m.title || '') + '||' + (m.artist || '')] || '';
+      return {
+        slug: entry.slug,
+        title: m.title || entry.slug,
+        artist: m.artist || 'Unknown',
+        bpm: m.bpm || 0,
+        key: m.key || fallbackKey || '',
+        genres: genreMap[slug] || genreMap[entry.slug] || [],
+        tuning: m.tuning || '',
+        capo: m.capo || '',
+        difficulty: m.difficulty || '',
+        duration_bars: m.duration_bars || 0
+      };
+    })
+    .filter(s => {
+      const dedupeKey = (s.title + '||' + s.artist).toLowerCase();
+      if (seen.has(dedupeKey)) return false;
+      seen.add(dedupeKey);
+      return true;
+    });
 }
 
 function songsRoutes(app) {

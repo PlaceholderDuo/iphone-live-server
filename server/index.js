@@ -39,8 +39,7 @@ app.get('/singer', (req, res) => {
 
 // Teleprompter — redirect to Stage HUD (synced with REAPER)
 app.get('/teleprompter', (req, res) => {
-  const host = req.hostname || req.get('host')?.split(':')[0] || 'localhost';
-  res.redirect(302, `http://${host}:3000/hud.html`);
+  res.sendFile(path.join(PUBLIC, 'teleprompter.html'));
 });
 
 // Dell kiosk page — redirect to Stage HUD

@@ -223,7 +223,71 @@ After a singer leaves, the page showed "Thanks for coming!" with no way to rejoi
 
 **Fix**: The "Reset & start over" button is replaced with "Join the queue" on leave. It calls `resetAll()` which clears the form and returns to step 1 (name entry). The singer can immediately rejoin with the same flow. The leave button is also hidden since the singer no longer has songs in the queue.
 
-### [2026-07-13] Show-Ready Polish
+### [2026-07-13] PCDJ Two-Queue Rotation System
+
+**Before**: Flat `singer_queue` array — everyone in one list, cleared per round. New singers went to the end, and there was no way to control when they entered the active rotation. The band had no concept of "this round's singers" vs "people waiting their turn."
+
+**After**: PCDJ-style two-queue system modeled after professional karaoke hosting software:
+
+```
+waiting_list  →  active_rotation  →  performance
+ (new signups)    (current round)     (singer finishes)
+```
+
+#### Why Two Queues?
+
+A flat queue fails for live band karaoke for three reasons:
+
+1. **New singers don't know when they'll be called.** In a flat FIFO queue with 15 people, singer #15 has no idea if they'll sing in 10 minutes or 2 hours. With a waiting list, they know: "I'll be promoted when the next round starts."
+
+2. **The band needs a manageable round size.** Playing 15 singers in a row with no break is exhausting. With `start-round` promoting exactly 2 singers per round, each round is predictable — the band plays a few, takes a break, plays more. The round size is a lever the band controls, not dictated by however many people signed up.
+
+3. **Late arrivals get fair treatment.** Someone who arrives at 10 PM doesn't jump ahead of someone waiting since 9 PM. But they also don't wait 2 hours. The waiting list is FIFO, and each round pulls the next 2. A person arriving late waits through at most 1-2 rounds before being promoted — predictable and fair.
+
+#### How It Works
+
+```
+Round 1 starts:
+  waiting_list: [Alice, Bob, Carol, Dave, Eve]
+  → start-round promotes 2
+  active_rotation: [Alice, Bob]
+  waiting_list: [Carol, Dave, Eve]
+
+Band plays: Alice performs → complete → Alice removed
+              Bob performs → complete → Bob removed
+
+Round 2 starts:
+  waiting_list: [Carol, Dave, Eve]
+  → start-round promotes 2
+  active_rotation: [Carol, Dave]
+  waiting_list: [Eve]
+
+...new signups keep joining waiting_list...
+  waiting_list: [Eve, Frank, Grace]
+  → start-round promotes 2
+  active_rotation: [Eve, Frank]
+  waiting_list: [Grace]
+```
+
+Key invariants:
+- A singer can only be in ONE list at a time
+- `start-round` promotes exactly `Math.min(2, waiting_list.length)` singers
+- 2 is the default; configurable for different venue sizes
+- Round counter increments only on `start-round`
+- `complete` removes a singer from active_rotation after performance
+- `leave` removes from whichever list the singer is in
+
+#### Lock-in behavior
+- Lock-in (can't change song) only applies to active_rotation positions < 3
+- Waiting list singers can always change their song (they haven't been called up yet)
+- This is more permissive than the flat queue — a singer at waiting_list position 1 can change their song, whereas before they'd be position 0 and locked
+
+#### Client display
+The singer page shows two sections in the queue display:
+- **Active Rotation** (green badge, full opacity) — these singers are up this round
+- **Waiting List** (gray badge, dimmed) — these singers go next round
+- Each singer sees their own position and whether they're active or waiting
+- "You're in the rotation!" vs "You're in the waiting list!" — clear status messaging
 
 **Device persistence**: `localStorage.setItem('singerName', name)` on every submit. On page load, if a saved name exists, skip directly to the "Your Songs" dashboard. This handles refreshes, WiFi drops, and accidental tab closes. `localStorage.removeItem('singerName')` on leave. Zero server cost — pure client-side persistence tied to the device.
 

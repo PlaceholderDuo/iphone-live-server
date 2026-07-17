@@ -103,7 +103,7 @@
         <h3>1. What's your name?</h3>
         <input id="singerName" placeholder="Your name or stage name" maxlength="40" autocomplete="off">
         <div id="nameError" class="text-sm mt-4" style="color:var(--red);display:none"></div>
-        <button class="btn" style="width:100%;margin-top:8px" onclick="goStep2()">Next</button>
+        <button type="button" class="btn" style="width:100%;margin-top:8px" id="nextBtn">Next</button>
       </div>
     </div>
 
@@ -224,10 +224,11 @@ function renderSongPicker(songs) {
   if (songs.length === 0) { el.innerHTML = '<div class="song-item" style="cursor:default;justify-content:center;color:var(--text2);padding:16px">No songs found</div>'; return; }
   el.innerHTML = songs.map(s => {
     const isSel = selectedSong && selectedSong.slug === s.slug;
-    return `<div class="song-item${isSel?' selected':''}" onclick="selectSong('${s.slug}','${esc(s.title)}','${esc(s.artist)}')">
-      <div><div class="title">${esc(s.title)}</div><div class="artist">${esc(s.artist)}</div></div>
-      <div class="text-sm">${esc(s.key)} ${(s.genres||[]).map(g=>`<span class="tag">${g}</span>`).join('')}</div>
-    </div>`;
+    var genreTags = (s.genres || []).map(function(g) { return '<span class="tag">' + esc(g) + '</span>'; }).join('');
+    return '<div class="song-item' + (isSel ? ' selected' : '') + '" onclick="selectSong(\'' + s.slug + '\',\'' + esc(s.title) + '\',\'' + esc(s.artist) + '\')">' +
+      '<div><div class="title">' + esc(s.title) + '</div><div class="artist">' + esc(s.artist) + '</div></div>' +
+      '<div class="text-sm">' + esc(s.key) + ' ' + genreTags + '</div>' +
+      '</div>';
   }).join('');
 }
 
@@ -328,47 +329,43 @@ function showMySongs() {
 async function loadMySongs() {
   const r = await api('/api/singer/queue');
   if (!r) return;
-  const mySongs = (r.queue || []).filter(e => e.singer === singerName);
+  const active = r.active_rotation || [];
+  const waiting = r.waiting_list || [];
+  const myActive = active.filter(function(e) { return e.singer === singerName; });
+  const myWaiting = waiting.filter(function(e) { return e.singer === singerName; });
+  const allSongs = active.concat(waiting);
 
-  document.getElementById('leaveBtn').style.display = mySongs.length > 0 ? 'block' : 'none';
+  document.getElementById('leaveBtn').style.display = (myActive.length + myWaiting.length > 0) ? 'block' : 'none';
   document.getElementById('step3Actions').innerHTML = '';
 
-  document.getElementById('resultTitle').textContent = mySongs.length === 1 ? 'You\'re in!' : 'Your Songs';
-  document.getElementById('resultSubtitle').textContent = 'You can add up to 2 songs at a time';
+  document.getElementById('resultTitle').textContent = myActive.length > 0 ? 'You\'re up this round!' : 'You\'re in the queue';
+  document.getElementById('resultSubtitle').textContent = 
+    myActive.length > 0 ? allSongs.length + ' singer' + (allSongs.length !== 1 ? 's' : '') + ' in queue'
+    : myWaiting.length > 0 ? 'You\'ll be called up soon. ' + allSongs.length + ' singer' + (allSongs.length !== 1 ? 's' : '') + ' ahead.'
+    : 'Join the queue!';
 
-  // Restore checkmark state (in case leaving changed it)
   document.getElementById('step3').querySelector('.checkmark').textContent = '\u2713';
 
   const slotsEl = document.getElementById('mySongSlots');
-  let html = '';
-
-  for (let i = 0; i < 2; i++) {
-    const s = mySongs[i];
-    const pos = s ? r.queue.indexOf(s) : -1;
-    if (s) {
-      const cls = i === 0 ? 'current' : 'next-round';
-      const label = i === 0 ? 'This Round' : 'Next Round';
-      html += `<div class="song-slot ${cls}" data-id="${s.id}" data-pos="${pos}" onclick="openSongModal(this)">
-        <div>
-          <div class="slot-num">${label}</div>
-          <div class="slot-title">${esc(s.song_title)}</div>
-          <div class="slot-artist">${esc(s.song_artist)}</div>
-        </div>
-        <div class="slot-arrow">&#9654;</div>
-      </div>`;
-    } else {
-      html += `<div class="song-slot empty">
-        <div>
-          <div class="slot-num">${i === 0 ? 'This Round' : 'Next Round'}</div>
-          <div class="slot-title">No song picked</div>
-        </div>
-      </div>`;
-    }
-  }
+  var html = '';
+  var entries = myActive.concat(myWaiting);
+  entries.forEach(function(s) {
+    var isActive = active.some(function(a) { return a.id === s.id; });
+    var label = isActive ? 'In Rotation' : 'Waiting';
+    var cls = isActive ? 'current' : 'next-round';
+    html += '<div class="song-slot ' + cls + '" data-id="' + s.id + '" data-active="' + isActive + '" onclick="openSongModal(this)">' +
+      '<div>' +
+      '<div class="slot-num">' + label + '</div>' +
+      '<div class="slot-title">' + esc(s.song_title) + '</div>' +
+      '<div class="slot-artist">' + esc(s.song_artist) + '</div>' +
+      '</div>' +
+      (isActive && active.indexOf(s) >= 3 ? '<div class="slot-arrow">&#9654;</div>' : '') +
+      '</div>';
+  });
   slotsEl.innerHTML = html;
 
   const addWrap = document.getElementById('addAnotherWrap');
-  if (mySongs.length < 2) {
+  if (entries.length < 2) {
     addWrap.innerHTML = '<button class="btn btn-blue" style="width:100%" onclick="addAnother()">Add Another Song</button>';
   } else {
     addWrap.innerHTML = '';
@@ -388,13 +385,16 @@ function addAnother() {
 }
 
 function openSongModal(el) {
-  const id = el.dataset.id;
-  const pos = parseInt(el.dataset.pos);
-  const title = el.querySelector('.slot-title').textContent;
-  const artist = el.querySelector('.slot-artist').textContent;
+  var id = el.dataset.id;
+  var pos = parseInt(el.dataset.pos);
+  var isActive = el.dataset.active === 'true';
+  var title = el.querySelector('.slot-title').textContent;
+  var artist = el.querySelector('.slot-artist').textContent;
 
-  if (pos < 3) {
-    showModal('Locked', title, artist, 'Sorry, your song cannot be changed at this time. Songs are locked-in once you are 3rd in the queue.', false);
+  var canChange = !isActive || pos >= 3;
+
+  if (!canChange) {
+    showModal('Locked', title, artist, 'Sorry, your song cannot be changed at this time. Songs are locked-in once you are 3rd in the rotation.', false);
   } else {
     showModal('Your Song', title, artist, '', true);
   }
@@ -402,14 +402,14 @@ function openSongModal(el) {
 
 function showModal(heading, title, artist, msg, canChange) {
   const box = document.getElementById('modalBox');
-  let html = `<h3>${esc(heading)}</h3>`;
-  html += `<div class="modal-song">${esc(title)}</div>`;
-  html += `<div class="modal-artist">${esc(artist)}</div>`;
-  if (msg) html += `<div class="modal-msg">${esc(msg)}</div>`;
+  var html = '<h3>' + esc(heading) + '</h3>';
+  html += '<div class="modal-song">' + esc(title) + '</div>';
+  html += '<div class="modal-artist">' + esc(artist) + '</div>';
+  if (msg) html += '<div class="modal-msg">' + esc(msg) + '</div>';
   if (canChange) {
-    html += `<button class="btn" onclick="changeSong()">Change Song</button>`;
+    html += '<button class="btn" onclick="changeSong()">Change Song</button>';
   }
-  html += `<button class="btn btn-ghost" onclick="closeModal()">Go Back</button>`;
+  html += '<button class="btn btn-ghost" onclick="closeModal()">Go Back</button>';
   box.innerHTML = html;
   document.getElementById('modalOverlay').classList.add('show');
 }
@@ -480,7 +480,10 @@ async function loadSingerQueue() {
   const r = await api('/api/singer/queue');
   if (!r) return;
   const el = document.getElementById('singerQueueList');
-  document.getElementById('queueSize').textContent = r.queue.length + ' singers';
+  const active = r.active_rotation || [];
+  const waiting = r.waiting_list || [];
+  const total = active.length + waiting.length;
+  document.getElementById('queueSize').textContent = total + ' singers';
   const etaEl = document.getElementById('queueEta');
   if (r.eta_minutes > 0) {
     etaEl.style.display = 'block';
@@ -488,33 +491,33 @@ async function loadSingerQueue() {
   } else {
     etaEl.style.display = 'none';
   }
-  // Band playing indicator
-  if (r.band_playing) {
-    el.innerHTML = '<div class="song-item" style="background:var(--surface2);border-left:3px solid var(--yellow);cursor:default;padding:12px">' +
-      '<div><div style="font-weight:600;color:var(--yellow)">Placeholder Duo</div>' +
-      '<div class="text-sm" style="color:var(--yellow)">Band is playing — singers coming up next!</div></div>' +
-      '<span class="badge" style="background:var(--yellow);color:#000">♫</span></div>';
-  } else if (r.queue.length === 0) {
+  if (total === 0) {
     el.innerHTML = '<div class="song-item" style="cursor:default;justify-content:center;color:var(--text2);padding:16px">No one in queue yet</div>';
-  } else {
-    el.innerHTML = r.queue.map((e, i) => {
-    const isMine = singerName && e.singer === singerName;
-    return `<div class="singer-entry${isMine?' mine':''}" data-id="${e.id}" onclick="${isMine?`openQueueEntry('${e.id}',${i})`:'return'}">
-      <div><div class="singer-name">${esc(e.singer)}${isMine?' <span class="tag tag-accent">you</span>':''}</div><div class="text-sm">${esc(e.song_title)} — ${esc(e.song_artist)}</div></div>
-      <span class="badge">${i+1}</span>
-    </div>`;
-  }).join('');
+    return;
+  }
+  var allSingers = active.concat(waiting);
+  var html = '';
+  allSingers.forEach(function(e, i) {
+    var isMine = singerName && e.singer === singerName;
+    var isActive = i < active.length;
+    html += '<div class="singer-entry' + (isMine ? ' mine' : '') + '" style="' + (!isActive ? 'opacity:0.7' : '') + '">' +
+      '<div><div class="singer-name">' + esc(e.singer) + (isMine ? ' <span class="tag tag-accent">you</span>' : '') + '</div><div class="text-sm">' + esc(e.song_title) + ' — ' + esc(e.song_artist) + '</div></div>' +
+      '<span class="badge" style="background:' + (isActive ? 'var(--green)' : 'var(--text2)') + '">' + (i + 1) + '</span>' +
+      '</div>';
+    if (i === active.length - 1 && waiting.length > 0) {
+      html += '<div style="font-size:10px;color:var(--text2);text-align:center;padding:4px 0;border-top:1px solid #222">next round</div>';
+    }
+  });
+  el.innerHTML = html;
 }
 
-function openQueueEntry(id, pos) {
-  // Open the modal from the queue click
-  const slotEl = document.querySelector(`.song-slot[data-id="${id}"]`);
+function openQueueEntry(id, pos, isActive) {
+  const slotEl = document.getElementById('mySongSlots').querySelector('.song-slot[data-id="' + id + '"]');
   if (slotEl) {
     openSongModal(slotEl);
   } else {
-    // Build modal manually from queue data
-    if (pos < 3) {
-      showModal('Locked', '', '', 'Sorry, your song cannot be changed at this time. Songs are locked-in once you are 3rd in the queue.', false);
+    if (isActive && pos < 3) {
+      showModal('Locked', '', '', 'Sorry, your song cannot be changed at this time. Songs are locked-in once you are 3rd in the rotation.', false);
     } else {
       showModal('Your Song', '', '', '', false);
     }
@@ -523,8 +526,9 @@ function openQueueEntry(id, pos) {
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 
-document.getElementById('singerName').addEventListener('keydown', e => { if (e.key === 'Enter') goStep2(); });
-document.getElementById('songSearch').addEventListener('keydown', e => { if (e.key === 'Enter' && selectedSong) submitSinger(); });
+document.getElementById('singerName').addEventListener('keydown', function(e) { if (e.key === 'Enter') goStep2(); });
+document.getElementById('nextBtn').addEventListener('click', function() { goStep2(); });
+document.getElementById('songSearch').addEventListener('keydown', function(e) { if (e.key === 'Enter' && selectedSong) submitSinger(); });
 
 loadSongs();
 loadGenres();
@@ -539,9 +543,26 @@ var savedName = localStorage.getItem('singerName');
 if (savedName) {
   singerName = savedName;
   document.getElementById('singerName').value = savedName;
-  document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
-  document.getElementById('step3').classList.add('active');
-  loadMySongs();
+  // Only skip to dashboard if this singer actually has songs in the queue
+  api('/api/singer/queue').then(function(r) {
+    if (r) {
+      var active = r.active_rotation || [];
+      var waiting = r.waiting_list || [];
+      var mySongs = active.concat(waiting).filter(function(e) { return e.singer === savedName; });
+      if (mySongs.length > 0) {
+        document.querySelectorAll('.step').forEach(function(s) { s.classList.remove('active'); });
+        document.getElementById('step3').classList.add('active');
+        loadMySongs();
+        return;
+      }
+    }
+    // No songs found — clear localStorage and show step 1
+    localStorage.removeItem('singerName');
+    singerName = '';
+    document.getElementById('singerName').value = '';
+  }).catch(function() {
+    // Server not available, stay on step 1
+  });
 }
 
 (function initConfetti() {
