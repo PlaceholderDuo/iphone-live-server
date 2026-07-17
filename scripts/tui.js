@@ -310,9 +310,9 @@ function bumperPost(action) {
   });
 }
 
-function hudPost(action) {
+function hudPost(action, body) {
   return new Promise((resolve) => {
-    const data = JSON.stringify({});
+    const data = JSON.stringify(body || {});
     const opts = {
       hostname: 'localhost', port: 3000, path: '/api/local/' + action,
       method: 'POST',
@@ -327,6 +327,25 @@ function hudPost(action) {
     req.write(data);
     req.end();
   });
+}
+
+function getNextInSetlist(direction) {
+  const sl = queueState.band_queue || [];
+  if (sl.length === 0) return null;
+  const curTitle = (reaperState.currentSong || '').toLowerCase();
+  const curIdx = sl.findIndex(s => (s.title || '').toLowerCase() === curTitle);
+  if (direction === 'next') {
+    const nextIdx = curIdx >= 0 && curIdx + 1 < sl.length ? curIdx + 1 : (curIdx < 0 ? 0 : -1);
+    return nextIdx >= 0 ? sl[nextIdx].title : null;
+  } else {
+    const prevIdx = curIdx > 0 ? curIdx - 1 : (curIdx < 0 ? sl.length - 1 : -1);
+    return prevIdx >= 0 ? sl[prevIdx].title : null;
+  }
+}
+
+function getFirstInSetlist() {
+  const sl = queueState.band_queue || [];
+  return sl.length > 0 ? sl[0].title : null;
 }
 
 function adjustBumperVolume(target) {
@@ -1235,9 +1254,13 @@ function handleInput(chunk) {
             hudPost('pause');
           } else if (queueState.current_song) {
             doAction('play');
+            const first = getFirstInSetlist();
+            if (first && !reaperState.currentSong) hudPost('load', { title: first });
             hudPost('play');
           } else {
             doAction('start');
+            const first = getFirstInSetlist();
+            if (first) hudPost('load', { title: first });
             hudPost('play');
           }
         }
@@ -1245,18 +1268,28 @@ function handleInput(chunk) {
       case 0x50: // Shift+P — HUD play/pause toggle
         if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode) {
           hudReaperPlaying = !hudReaperPlaying;
+          if (hudReaperPlaying && !reaperState.currentSong) {
+            const first = getFirstInSetlist();
+            if (first) hudPost('load', { title: first });
+          }
           hudPost(hudReaperPlaying ? 'play' : 'pause');
           statusMsg = hudReaperPlaying ? 'HUD playing' : 'HUD paused';
         }
         break;
-      case 0x4E: // Shift+N — HUD next song
+      case 0x4E: // Shift+N — HUD next song (from setlist)
         if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode) {
-          hudPost('next').then(() => { statusMsg = 'HUD: next song'; });
+          const nextTitle = getNextInSetlist('next');
+          hudPost('next', { title: nextTitle }).then(() => {
+            statusMsg = nextTitle ? 'HUD: ' + nextTitle : 'HUD: next (not in setlist)';
+          });
         }
         break;
-      case 0x42: // Shift+B — HUD prev song
+      case 0x42: // Shift+B — HUD prev song (from setlist)
         if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode) {
-          hudPost('prev').then(() => { statusMsg = 'HUD: prev song'; });
+          const prevTitle = getNextInSetlist('prev');
+          hudPost('prev', { title: prevTitle }).then(() => {
+            statusMsg = prevTitle ? 'HUD: ' + prevTitle : 'HUD: prev (not in setlist)';
+          });
         }
         break;
       case 0x53: // Shift+S — HUD stop
