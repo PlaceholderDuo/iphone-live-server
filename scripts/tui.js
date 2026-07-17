@@ -205,7 +205,7 @@ async function refreshReaperState() {
       let data = '';
       res.on('data', c => data += c);
       res.on('end', () => {
-        try { const s = JSON.parse(data); reaperState = s; } catch {}
+        try { const s = JSON.parse(data); reaperState = s; hudReaperPlaying = s.playing || false; } catch {}
         resolve();
       });
     });
@@ -522,9 +522,15 @@ function render() {
     const bar = s.bpm > 0 ? Math.floor((s.position || 0) * s.bpm / (4 * 60)) + 1 : 1;
     out += drawText(ct + 1, 3, BOLD + (s.currentSong || '?').substring(0, lw - 6) + RESET);
     out += drawText(ct + 2, 3, DIM + (s.currentArtist || '') + '  ' + (s.currentKey || '') + RESET);
-    out += drawText(ct + 3, 3, `${DIM}Bar${RESET} ${bar}  ${DIM}BPM${RESET} ${s.bpm || '-'}  ${DIM}Pos${RESET} ${Math.floor(s.position || 0)}s`);
-    const nextLabel = s.nextSong ? 'Next: ' + s.nextSong : '';
-    out += drawText(ct + 4, 3, s.playing ? (GREEN + '● PLAYING' + RESET) : (YELLOW + '● PAUSED' + RESET) + '  ' + DIM + nextLabel + RESET);
+    out += drawText(ct + 3, 3, `${DIM}Bar${RESET} ${bar}  ${DIM}BPM${RESET} ${s.bpm || '-'}  ${DIM}Pos${RESET} ${Math.floor(s.position || 0)}s/${Math.floor(s.duration || 0)}s`);
+    // Show REAPER state OR HUD local state
+    if (s.connected) {
+      const nextLabel = s.nextSong ? 'Next: ' + s.nextSong : '';
+      out += drawText(ct + 4, 3, s.playing ? (GREEN + '● REAPER PLAYING' + RESET) : (YELLOW + '● REAPER PAUSED' + RESET) + '  ' + DIM + nextLabel + RESET);
+    } else {
+      const hudStatus = hudReaperPlaying ? (GREEN + '● HUD PLAYING (local)' + RESET) : (YELLOW + '○ HUD stopped' + RESET);
+      out += drawText(ct + 4, 3, hudStatus + '  ' + DIM + 'P=play/pause N=next B=prev S=stop' + RESET);
+    }
     if (npHighlight) out += drawText(ct + 5, 3, DIM + '(← → switch panels, Tab toggles queue view)' + RESET);
   } else {
     out += drawText(ct + 2, 3, DIM + 'REAPER not connected' + RESET);
