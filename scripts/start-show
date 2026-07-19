@@ -44,6 +44,9 @@ cleanup() {
     echo "  Singer server stopped"
   fi
 
+  # Restore system state (AWDL, etc)
+  bash "$SCRIPT_DIR/show-optimize" stop 2>/dev/null || true
+
   echo "♪ All clear."
 }
 trap cleanup EXIT INT TERM

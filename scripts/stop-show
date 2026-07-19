@@ -1,8 +1,12 @@
 #!/bin/bash
-# stop-show — Kill all show servers
+# stop-show — Kill all show servers + restore system state
 # Usage: stop show server   (from anywhere via .zshrc alias)
 
 echo "♪ Stopping all show servers..."
+
+# Restore system state (AWDL, etc)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+bash "$SCRIPT_DIR/show-optimize" stop 2>/dev/null || true
 
 # Kill any afplay bumper music first
 pkill -9 -f "afplay.*/bumper" 2>/dev/null || true

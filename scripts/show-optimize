@@ -1,0 +1,41 @@
+#!/bin/bash
+# show-optimize — system tuning for low-latency audio during a live show
+# Usage:
+#   show-optimize start   — optimize for performance (disable AWDL, kill noisy apps)
+#   show-optimize stop    — restore normal state (re-enable AWDL)
+
+set -e
+
+case "${1:-}" in
+  start)
+    echo "♪ Optimizing system for live audio..."
+
+    # Disable AWDL (AirDrop/Handoff WiFi noise — proven dropout cause)
+    sudo ifconfig awdl0 down 2>/dev/null && echo "  AWDL: disabled" || true
+
+    # Kill TouchBar — wastes CPU polling the HID SPI bus
+    sudo pkill -9 TouchBarServer 2>/dev/null && echo "  TouchBar: killed" || true
+
+    # Gracefully quit Safari — #1 CPU hog with its WebKit rendering
+    osascript -e 'tell application "Safari" to quit' 2>/dev/null && echo "  Safari: quit" || true
+
+    # Kill Siri — background agent that listens/wakes
+    pkill -9 -f Siri 2>/dev/null && echo "  Siri: killed" || true
+
+    echo "♪ System optimized."
+    ;;
+
+  stop)
+    echo "♪ Restoring system state..."
+
+    # Re-enable AWDL
+    sudo ifconfig awdl0 up 2>/dev/null && echo "  AWDL: re-enabled" || true
+
+    echo "♪ System restored (apps will restart on demand)."
+    ;;
+
+  *)
+    echo "Usage: show-optimize {start|stop}"
+    exit 1
+    ;;
+esac

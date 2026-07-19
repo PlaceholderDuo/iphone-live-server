@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 const http = require('http');
 const crypto = require('crypto');
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
 const SERVER_PORT = 3300;
 const PROJECT_DIR = path.resolve(__dirname, '..');
-const LOG_FILE = '/tmp/liveshow-server.log';
+const SHOW_OPTIMIZE = path.resolve(__dirname, 'show-optimize');
 let authToken = '';
 
 const ESC = '\x1b[';
@@ -1150,7 +1150,9 @@ function handleInput(chunk) {
 
   for (const ch of chunk) {
     switch (ch) {
-      case 0x71: case 0x51: bumperPost('stop'); stopServer(); process.stdout.write(SHOW); process.exit(0);
+      case 0x71: case 0x51:
+        try { execSync(`bash "${SHOW_OPTIMIZE}" stop`, { timeout: 5000 }); } catch(e) {}
+        bumperPost('stop'); stopServer(); process.stdout.write(SHOW); process.exit(0);
       case 0x4B: doAction('toggle-karaoke'); break; // Shift+K only
       case 0x4D: // Shift+M — stop bumper immediately
         if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode) {
@@ -1254,13 +1256,14 @@ function handleInput(chunk) {
             hudPost('pause');
           } else if (queueState.current_song) {
             doAction('play');
-            const first = getFirstInSetlist();
-            if (first && !reaperState.currentSong) hudPost('load', { title: first });
+            // Push setlist to LSM so iPhone next/prev follows setlist order
+            const songs = (queueState.band_queue || []).map(s => ({ title: s.title }));
+            if (songs.length > 0) hudPost('setlist', { songs });
             hudPost('play');
           } else {
             doAction('start');
-            const first = getFirstInSetlist();
-            if (first) hudPost('load', { title: first });
+            const songs = (queueState.band_queue || []).map(s => ({ title: s.title }));
+            if (songs.length > 0) hudPost('setlist', { songs });
             hudPost('play');
           }
         }
@@ -1292,46 +1295,17 @@ function handleInput(chunk) {
           });
         }
         break;
-      case 0x53: // Shift+S — HUD stop
-        if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode) {
-          hudPost('stop');
-          hudReaperPlaying = false;
-          statusMsg = 'HUD stopped';
-        }
-        break;
-      case 0x0D: // Enter — play on the fly (setlist view only)
-        if (focus === 'queue' && queueView !== 'singers' && !inputMode && !confirmMode && !setlistMode && !settingsMode) {
-          const sl = queueState.band_queue || [];
-          if (sl.length > 0 && bandCursor >= 0 && bandCursor < sl.length) {
-            doAction('play-now', bandCursor);
-          }
-        }
-        break;
-      case 0x63: case 0x43: // c/C — clear round (singers only, with confirm)
-        if (focus === 'queue' && queueView === 'singers') {
-          confirmMode = true;
-          confirmItem = { title: `Clear Round ${singerQueue.round} (${(singerQueue.queue || []).length} singers)` };
-          confirmAction = 'clear-round';
-          renderConfirm();
-        }
-        break;
-      case 0x61: case 0x41: // a/A — search + add
-        if (focus === 'queue' && queueView === 'singers') {
-          enterSearchMode('add-singer');
-        } else if (focus === 'queue') {
-          enterSearchMode('add-band');
-        } else {
-          enterSearchMode('add');
-        }
-        break;
-      case 0x72: case 0x52: doAction('restart'); break;
-      case 0x77: case 0x57: showWifiInfo = true; render(); break; // w/W = WiFi info
-      case 0x53: // Shift+S — Start Show
+      case 0x53: // Shift+S — Start Show or HUD stop
         if (showMode === 'connected') {
           showMode = 'live';
           apiPost('/api/show-mode', { mode: 'live' }).catch(() => {});
           log('Show started — Dell HUD will activate');
+          try { execSync(`bash "${SHOW_OPTIMIZE}" start`, { timeout: 5000 }); log('System optimized for live audio'); } catch(e) { log('Optimize failed: ' + e.message); }
           render();
+        } else if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode) {
+          hudPost('stop');
+          hudReaperPlaying = false;
+          statusMsg = 'HUD stopped';
         }
         break;
     }
@@ -1366,8 +1340,8 @@ async function init() {
   process.stdin.on('data', handleInput);
   process.stdout.on('resize', () => { if (!inputMode && !nameInputMode && !confirmMode && !showWifiInfo && !setlistMode && !settingsMode && !exportMode) render(); else if (inputMode || nameInputMode) renderSearch(); else if (setlistMode) renderSetlistPicker(); else if (settingsMode || exportMode) renderSettings(); });
   process.on('exit', () => { process.stdout.write(SHOW); });
-  process.on('SIGINT', () => { process.stdout.write(SHOW); process.exit(0); });
-  process.on('SIGTERM', () => { process.stdout.write(SHOW); process.exit(0); });
+  process.on('SIGINT', () => { try { execSync(`bash "${SHOW_OPTIMIZE}" stop`, { timeout: 5000 }); } catch(e) {} process.stdout.write(SHOW); process.exit(0); });
+  process.on('SIGTERM', () => { try { execSync(`bash "${SHOW_OPTIMIZE}" stop`, { timeout: 5000 }); } catch(e) {} process.stdout.write(SHOW); process.exit(0); });
 
   log('TUI started. Checking server...');
   try {
