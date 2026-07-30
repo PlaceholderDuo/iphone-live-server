@@ -37,6 +37,35 @@ let songCache = [];
 let karaokeEnabled = true;
 let hudReaperPlaying = false;
 let karaokePausedMsg = '';
+let syncHealth = { ok: true, annotatedPct: 100, totalLines: 0, annotatedLines: 0, warnings: [] };
+let songSyncStats = {};
+let showPreflight = false;
+let preflightData = null;
+let preflightLoading = false;
+
+function getCurrentSection(sections, position) {
+  if (!sections || sections.length === 0) return null;
+  for (let i = sections.length - 1; i >= 0; i--) {
+    if (position >= (sections[i].time || 0)) {
+      const next = i + 1 < sections.length ? sections[i + 1] : null;
+      return { current: sections[i], next, index: i };
+    }
+  }
+  return null;
+}
+
+function sectionProgressBar(current, nextSection, position, duration, width) {
+  if (!current) return '';
+  const start = current.time || 0;
+  const end = nextSection ? nextSection.time : (duration || 999);
+  if (end <= start) return '';
+  const pct = Math.max(0, Math.min(1, (position - start) / (end - start)));
+  const barWidth = Math.max(4, Math.min(20, Math.floor(width * 0.15)));
+  const filled = Math.round(pct * barWidth);
+  const bar = GREEN + '█'.repeat(filled) + DIM + '░'.repeat(barWidth - filled) + RESET;
+  const remaining = Math.max(0, Math.round(end - position));
+  return ` ${bar} ${remaining}s`;
+}
 
 let focus = 'main';
 let queueView = 'singers';
@@ -191,12 +220,17 @@ async function refreshState() {
   if (ks) { karaokeEnabled = ks.karaoke_enabled; karaokePausedMsg = ks.karaoke_paused_message || ''; }
   const cfg = await apiGet('/api/config');
   if (cfg && cfg.max_songs_between_band !== undefined) maxSongsBetweenBand = cfg.max_songs_between_band || 0;
-  // Poll REAPER state from port 3000
   await refreshReaperState();
-  // Poll connected clients
+  await refreshSyncHealth();
   await refreshClients();
   await refreshBumper();
   refreshSysStats();
+  // Song sync stats — only refresh every 5 cycles (10s) since it scans files
+  if (!refreshState._counter) refreshState._counter = 0;
+  refreshState._counter++;
+  if (refreshState._counter % 5 === 0 || Object.keys(songSyncStats).length === 0) {
+    refreshSongSyncStats();
+  }
 }
 
 async function refreshReaperState() {
@@ -229,6 +263,45 @@ async function refreshClients() {
   });
 }
 
+async function refreshSyncHealth() {
+  return new Promise((resolve) => {
+    const req = http.request({ hostname: 'localhost', port: 3000, path: '/api/sync-health', method: 'GET', timeout: 2000 }, (res) => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => {
+        try { const h = JSON.parse(data); if (h && h.lyricSync) syncHealth = h.lyricSync; } catch {}
+        resolve();
+      });
+    });
+    req.on('error', () => resolve());
+    req.end();
+  });
+}
+
+async function refreshSongSyncStats() {
+  return new Promise((resolve) => {
+    const req = http.request({ hostname: 'localhost', port: 3000, path: '/api/preflight', method: 'GET', timeout: 5000 }, (res) => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => {
+        try {
+          const pf = JSON.parse(data);
+          if (pf && pf.setlist && pf.setlist.songs) {
+            const stats = {};
+            for (const s of pf.setlist.songs) {
+              stats[s.title] = s.status || (s.annotatedPct >= 95 ? 'ok' : s.annotatedPct >= 70 ? 'warn' : 'error');
+            }
+            songSyncStats = stats;
+          }
+        } catch {}
+        resolve();
+      });
+    });
+    req.on('error', () => resolve());
+    req.end();
+  });
+}
+
 async function refreshBumper() {
   return new Promise((resolve) => {
     const req = http.request({ hostname: 'localhost', port: 3000, path: '/bumper/api/status', method: 'GET', timeout: 2000 }, (res) => {
@@ -240,6 +313,24 @@ async function refreshBumper() {
       });
     });
     req.on('error', () => resolve());
+    req.end();
+  });
+}
+
+async function fetchPreflight() {
+  preflightLoading = true;
+  if (showPreflight) renderPreflight();
+  return new Promise((resolve) => {
+    const req = http.request({ hostname: 'localhost', port: 3000, path: '/api/preflight', method: 'GET', timeout: 10000 }, (res) => {
+      let data = '';
+      res.on('data', c => data += c);
+      res.on('end', () => {
+        try { preflightData = JSON.parse(data); } catch { preflightData = null; }
+        preflightLoading = false;
+        resolve();
+      });
+    });
+    req.on('error', () => { preflightData = null; preflightLoading = false; resolve(); });
     req.end();
   });
 }
@@ -502,6 +593,7 @@ function render() {
   if (inputMode || nameInputMode) { renderSearch(); return; }
   if (confirmMode) { renderConfirm(); return; }
   if (showWifiInfo) { renderWiFiInfo(); return; }
+  if (showPreflight) { renderPreflight(); return; }
   if (setlistMode) { renderSetlistPicker(); return; }
   if (settingsMode || exportMode) { renderSettings(); return; }
 
@@ -540,9 +632,15 @@ function render() {
     const s = reaperState;
     const bar = s.bpm > 0 ? Math.floor((s.position || 0) * s.bpm / (4 * 60)) + 1 : 1;
     out += drawText(ct + 1, 3, BOLD + (s.currentSong || '?').substring(0, lw - 6) + RESET);
-    out += drawText(ct + 2, 3, DIM + (s.currentArtist || '') + '  ' + (s.currentKey || '') + RESET);
-    out += drawText(ct + 3, 3, `${DIM}Bar${RESET} ${bar}  ${DIM}BPM${RESET} ${s.bpm || '-'}  ${DIM}Pos${RESET} ${Math.floor(s.position || 0)}s/${Math.floor(s.duration || 0)}s`);
-    // Show REAPER state OR HUD local state
+    const secInfo = getCurrentSection(s.sections, s.position || 0);
+    let secStr = '';
+    if (secInfo) {
+      secStr = '  ' + CYAN + '▶ ' + secInfo.current.text + RESET;
+      if (secInfo.next) secStr += '  ' + DIM + 'Next: ' + secInfo.next.text + RESET;
+    }
+    out += drawText(ct + 2, 3, DIM + (s.currentArtist || '') + '  ' + (s.currentKey || '') + secStr + RESET);
+    const progressBar = sectionProgressBar(secInfo ? secInfo.current : null, secInfo ? secInfo.next : null, s.position || 0, s.duration || 0, lw);
+    out += drawText(ct + 3, 3, `${DIM}Bar${RESET} ${bar}  ${DIM}BPM${RESET} ${s.bpm || '-'}  ${DIM}Pos${RESET} ${Math.floor(s.position || 0)}s/${Math.floor(s.duration || 0)}s${progressBar}`);
     if (s.connected) {
       const nextLabel = s.nextSong ? 'Next: ' + s.nextSong : '';
       out += drawText(ct + 4, 3, s.playing ? (GREEN + '● REAPER PLAYING' + RESET) : (YELLOW + '● REAPER PAUSED' + RESET) + '  ' + DIM + nextLabel + RESET);
@@ -550,11 +648,35 @@ function render() {
       const hudStatus = hudReaperPlaying ? (GREEN + '● HUD PLAYING (local)' + RESET) : (YELLOW + '○ HUD stopped' + RESET);
       out += drawText(ct + 4, 3, hudStatus + '  ' + DIM + 'P=play/pause N=next B=prev S=stop' + RESET);
     }
-    if (npHighlight) out += drawText(ct + 5, 3, DIM + '(← → switch panels, Tab toggles queue view)' + RESET);
+    // Sync health line
+    const sh = syncHealth;
+    let syncLine = '';
+    if (sh.totalLines > 0) {
+      const pct = sh.annotatedPct || 0;
+      const hasTimeAnnotations = true;
+      if (pct >= 95) {
+        syncLine = GREEN + '● Sync: ' + RESET + `${pct}% timed  ${DIM}${sh.totalLines} lines${RESET}`;
+      } else if (pct >= 70) {
+        syncLine = YELLOW + '◐ Sync: ' + RESET + `${pct}% timed  ${DIM}${sh.totalLines} lines${RESET}`;
+        if (sh.warnings && sh.warnings.length) {
+          const warn = sh.warnings[0].substring(0, lw - 40);
+          if (warn) syncLine += '  ' + YELLOW + warn + RESET;
+        }
+      } else {
+        syncLine = RED + '○ Sync: ' + RESET + (pct > 0 ? `${pct}%  ` : '') + RED + `ESTIMATED  ${DIM}${sh.totalLines} lines${RESET}`;
+        if (sh.warnings && sh.warnings.length) {
+          const warn = sh.warnings[0].substring(0, lw - 40);
+          if (warn) syncLine += '  ' + RED + warn + RESET;
+        }
+      }
+    } else {
+      syncLine = DIM + 'Sync: no lyric data available' + RESET;
+    }
+    const navHint = npHighlight ? '  ' + DIM + '(← → switch panels, Tab toggles queue view)' + RESET : '';
+    out += drawText(ct + 5, 3, syncLine + navHint);
   } else {
     out += drawText(ct + 2, 3, DIM + 'REAPER not connected' + RESET);
     out += drawText(ct + 3, 3, DIM + 'Start REAPER + load show project' + RESET);
-    // Show local HUD playback status
     const hudStatus = hudReaperPlaying ? (GREEN + '● HUD PLAYING (local)' + RESET) : (YELLOW + '○ HUD stopped' + RESET);
     out += drawText(ct + 4, 3, hudStatus + '  ' + DIM + 'P=play/pause N=next B=prev' + RESET);
     if (npHighlight) out += drawText(ct + 5, 3, DIM + '(→ to queue panel)' + RESET);
@@ -587,9 +709,15 @@ function render() {
       const song = ((item.song_title || '?') + ' — ' + (item.song_artist || '')).substring(0, rw - 10);
       out += drawText(ct + 1 + i, qr + 1, style + cursorMark + ' ' + n + '. ' + name + '  ' + DIM + song + RESET);
     } else {
-      const title = (item.title || '?').substring(0, rw - 6);
+      const title = (item.title || '?');
       const artist = (item.artist || '').substring(0, rw - 8);
       const keyInfo = item.key ? ' [' + GREEN + item.key + RESET + ']' : '';
+      const stat = songSyncStats[item.title];
+      let syncDot = '';
+      if (stat) {
+        syncDot = (stat === 'ok' ? GREEN : stat === 'warn' ? YELLOW : RED) + '●' + RESET + ' ';
+      }
+      const truncatedTitle = (syncDot + title).substring(0, rw - 6);
       let notes = '';
       if (isCursor) {
         const info = getSongInfo(item.slug);
@@ -601,7 +729,7 @@ function render() {
           if (parts.length) notes = '  ' + DIM + parts.join(' · ') + RESET;
         }
       }
-      out += drawText(ct + 1 + i, qr + 1, style + cursorMark + ' ' + n + '. ' + title + '  ' + DIM + artist + keyInfo + RESET + notes);
+      out += drawText(ct + 1 + i, qr + 1, style + cursorMark + ' ' + n + '. ' + truncatedTitle + '  ' + DIM + artist + keyInfo + RESET + notes);
     }
   }
   if (panelQueue.length === 0) {
@@ -645,7 +773,7 @@ function render() {
 
   // Actions
   const at = ut + uh;
-  const ah = 2;
+  const ah = 3;
   out += drawBox(at, 1, w - 1, ah, 'ACTIONS');
   const karaokeLabel = karaokeEnabled ? (RED + '[shift+k]' + RESET + ' Pause') : (GREEN + '[shift+k]' + RESET + ' Karaoke ON');
   const netLabel = externalStatus.online_detected ? (CYAN + '[o]' + RESET + ' Offline') : (YELLOW + '[o]' + RESET + ' Online');
@@ -655,8 +783,8 @@ function render() {
         ? `${BOLD}[p]${RESET} Promote  ${BOLD}[x]${RESET} Remove  ${BOLD}[B]${RESET} Kick  ${BOLD}[c]${RESET} Round  ${BOLD}[a]${RESET} Add Singer`
         : `${BOLD}[Enter]${RESET} Play Now  ${BOLD}[x]${RESET} Remove  ${BOLD}[a]${RESET} Add Song`)
     : `  ${BOLD}[n]${RESET} Next  ${BOLD}[b]${RESET} Prev  ${BOLD}[Space]${RESET} Play  ${BOLD}[a]${RESET} Add`;
-  const row1 = `${navKeys}  ${queueKeys}  ${BOLD}[m]${RESET} Bumper  ${BOLD}[E]${RESET} Export  ${BOLD}[I]${RESET} Import  ${BOLD}[?]${RESET} Settings  ${BOLD}[q]${RESET} Quit${showMode === 'connected' ? `  ${BOLD}[Shift+S]${RESET} Start Show` : ''}`;
-  const row2 = `${karaokeLabel}  ${netLabel}  ${BOLD}[e]${RESET} Sync  ${BOLD}[w]${RESET} WiFi  ${BOLD}[r]${RESET} Restart`;
+  const row1 = `${navKeys}  ${queueKeys}  ${BOLD}[m]${RESET} Bumper  ${BOLD}[E]${RESET} Export  ${BOLD}[I]${RESET} Import  ${BOLD}[?]${RESET} Settings  ${BOLD}[q]${RESET} Quit${showMode === 'connected' ? `  ${BOLD}[Shift+L]${RESET} Go LIVE` : ''}`;
+  const row2 = `${karaokeLabel}  ${netLabel}  ${BOLD}[[]${RESET}${BOLD}[]]${RESET} Seek 5s  ${BOLD}[e]${RESET} Sync  ${BOLD}[w]${RESET} WiFi  ${BOLD}[v]${RESET} Verify  ${BOLD}[r]${RESET} Restart`;
   out += drawText(at + 1, 3, row1);
   out += drawText(at + 2, 3, row2);
 
@@ -669,6 +797,86 @@ function render() {
     out += drawText(lt + 1 + i, 3, DIM + vl[i].substring(0, w - 4) + RESET);
   }
 
+  process.stdout.write(out);
+}
+
+function renderPreflight() {
+  const cols = process.stdout.columns || 80;
+  const rows = process.stdout.rows || 30;
+  const w = Math.min(cols, 60);
+  const h = Math.min(rows - 2, 20);
+  const bx = Math.floor((cols - w) / 2);
+  const by = Math.floor(rows / 2) - Math.floor(h / 2);
+
+  let out = HIDE + CLS;
+  out += drawBox(by, bx, w, h, 'PRE-SHOW CHECKLIST');
+
+  if (preflightLoading) {
+    out += drawText(by + 2, bx + 2, DIM + 'Running pre-flight checks...' + RESET);
+  } else if (!preflightData) {
+    out += drawText(by + 2, bx + 2, DIM + 'Press v to run pre-flight check' + RESET);
+  } else {
+    const pf = preflightData;
+    const row = by + 1;
+    let r = 0;
+
+    const checkIcon = (ok) => ok ? GREEN + '✓' + RESET : RED + '✗' + RESET;
+    const okLabel = RESET;
+
+    // Server
+    r++;
+    out += drawText(row + r, bx + 2, checkIcon(pf.server && pf.server.ok) + ' Server :3300 — ' + (pf.server && pf.server.ok ? GREEN + 'OK' + RESET : RED + 'OFFLINE' + RESET));
+
+    // REAPER
+    r++;
+    const reaperOk = pf.reaper && pf.reaper.connected;
+    const bridgeAge = pf.reaper ? (pf.reaper.bridgeAgeSec !== null ? pf.reaper.bridgeAgeSec.toFixed(1) + 's ago' : 'unknown') : '';
+    out += drawText(row + r, bx + 2, checkIcon(reaperOk) + ' REAPER bridge — ' + (reaperOk ? GREEN + 'CONNECTED' + RESET : RED + 'NOT CONNECTED' + RESET) + '  ' + DIM + bridgeAge + RESET);
+
+    // Cloudflare tunnel
+    r++;
+    const tunnelOk = pf.tunnel && pf.tunnel.active;
+    out += drawText(row + r, bx + 2, checkIcon(tunnelOk) + ' Guest tunnel — ' + (tunnelOk ? GREEN + 'ACTIVE' + RESET : YELLOW + 'NOT ACTIVE' + RESET));
+
+    // Bumper
+    r++;
+    const bumperOk = pf.bumper && pf.bumper.ready;
+    out += drawText(row + r, bx + 2, checkIcon(bumperOk) + ' Bumper music — ' + (bumperOk ? GREEN + pf.bumper.tracks + ' tracks' + RESET : RED + 'NO MUSIC' + RESET));
+
+    // Clients
+    r++;
+    const clientsOk = pf.clients && pf.clients.count > 0;
+    out += drawText(row + r, bx + 2, checkIcon(clientsOk) + ' Clients connected — ' + (clientsOk ? GREEN + pf.clients.count + RESET : YELLOW + 'none' + RESET));
+
+    // Setlist sync
+    r += 2;
+    out += drawText(row + r, bx + 2, BOLD + 'SETLIST SYNC STATUS:' + RESET);
+    r++;
+    if (pf.setlist && pf.setlist.songs && pf.setlist.songs.length > 0) {
+      out += drawText(row + r, bx + 2, `${pf.setlist.ok || 0} ok  ${pf.setlist.warn || 0} warn  ${pf.setlist.error || 0} error  (${pf.setlist.count || 0} total)`);
+      r++;
+      // List problem songs
+      const problems = pf.setlist.songs.filter(s => s.status !== 'ok');
+      for (const s of problems.slice(0, h - r - 3)) {
+        r++;
+        const dot = s.status === 'error' ? RED + '●' + RESET : YELLOW + '●' + RESET;
+        const pct = s.annotatedPct || 0;
+        out += drawText(row + r, bx + 3, dot + ' ' + (s.title || '?').substring(0, w - 20) + '  ' + DIM + pct + '% timed' + RESET);
+      }
+    } else {
+      out += drawText(row + r, bx + 2, DIM + 'No setlist loaded' + RESET);
+    }
+
+    // All clear or issues
+    r = h - 4;
+    if (pf.allClear) {
+      out += drawText(by + r, bx + 2, GREEN + BOLD + '  ALL CLEAR — Ready for show!' + RESET);
+    } else if (pf.issues && pf.issues.length) {
+      out += drawText(by + r, bx + 2, RED + BOLD + '  ⚠ ' + pf.issues.length + ' ISSUE(S) FOUND' + RESET);
+    }
+  }
+
+  out += drawText(by + h - 2, bx + 2, DIM + 'v refresh  Esc close' + RESET);
   process.stdout.write(out);
 }
 
@@ -1004,6 +1212,15 @@ function handleInput(chunk) {
     return;
   }
 
+  // In preflight mode
+  if (showPreflight) {
+    for (const ch of chunk) {
+      if (ch === 27) { showPreflight = false; preflightData = null; render(); return; }
+      if (ch === 0x76) { fetchPreflight().then(() => renderPreflight()); return; }
+    }
+    return;
+  }
+
   // In wifi info mode
   if (showWifiInfo) {
     showWifiInfo = false;
@@ -1311,6 +1528,24 @@ function handleInput(chunk) {
           render();
         }
         break;
+      case 0x76: // v — pre-show checklist (verify)
+        if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode) {
+          showPreflight = true;
+          fetchPreflight().then(() => { if (showPreflight) renderPreflight(); });
+        }
+        break;
+      case 0x5D: // ] — Seek forward 5s
+        if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode) {
+          hudPost('seek', { offset: 5 });
+          statusMsg = 'Seeked +5s';
+        }
+        break;
+      case 0x5B: // [ — Seek back 5s
+        if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode) {
+          hudPost('seek', { offset: -5 });
+          statusMsg = 'Seeked -5s';
+        }
+        break;
     }
   }
 }
@@ -1341,7 +1576,7 @@ async function init() {
   process.stdin.setRawMode(true);
   process.stdin.resume();
   process.stdin.on('data', handleInput);
-  process.stdout.on('resize', () => { if (!inputMode && !nameInputMode && !confirmMode && !showWifiInfo && !setlistMode && !settingsMode && !exportMode) render(); else if (inputMode || nameInputMode) renderSearch(); else if (setlistMode) renderSetlistPicker(); else if (settingsMode || exportMode) renderSettings(); });
+  process.stdout.on('resize', () => { if (!inputMode && !nameInputMode && !confirmMode && !showWifiInfo && !showPreflight && !setlistMode && !settingsMode && !exportMode) render(); else if (inputMode || nameInputMode) renderSearch(); else if (setlistMode) renderSetlistPicker(); else if (settingsMode || exportMode) renderSettings(); else if (showPreflight) renderPreflight(); });
   process.on('exit', () => { process.stdout.write(SHOW); });
   process.on('SIGINT', () => { try { execSync(`bash "${SHOW_OPTIMIZE}" stop`, { timeout: 5000 }); } catch(e) {} process.stdout.write(SHOW); process.exit(0); });
   process.on('SIGTERM', () => { try { execSync(`bash "${SHOW_OPTIMIZE}" stop`, { timeout: 5000 }); } catch(e) {} process.stdout.write(SHOW); process.exit(0); });
@@ -1372,7 +1607,7 @@ async function init() {
   setInterval(async () => {
     await checkServer();
     await refreshState();
-    if (!inputMode && !nameInputMode && !confirmMode && !showWifiInfo && !setlistMode && !settingsMode && !exportMode) render();
+    if (!inputMode && !nameInputMode && !confirmMode && !showWifiInfo && !showPreflight && !setlistMode && !settingsMode && !exportMode) render();
   }, 2000);
 }
 
