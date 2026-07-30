@@ -1,5 +1,59 @@
 # iPhoneLiveServer — Build Log
 
+## PROJECT MAP (Updated 2026-07-30)
+
+The Live Show System spans THREE project directories:
+
+```
+┌──────────────────────────────────────────────────────────┐
+│ A) iPhoneLiveServer  :3300  ← THIS PROJECT               │
+│    ~/Music/iPhoneLiveServer/                             │
+│    → TUI dashboard: scripts/tui.js (1379 lines)          │
+│    → Singer queue, song library, setlists, auth          │
+│    → Teleprompter page, band view, show control page     │
+│    → Launch: start show server  (via ~/.zshrc function)  │
+├──────────────────────────────────────────────────────────┤
+│ B) Live Show Manager  :3000  (REAPER bridge)             │
+│    ~/Library/.../Live Show Manager/web/                  │
+│    → server.js — REAPER OSC/MIDI bridge                 │
+│    → Stage HUD (hud.html/js/css) + iPhone controller     │
+│    → Bumper music engine, /api/sync-health               │
+│    → Managed by launchd plist (auto-start/restart)       │
+├──────────────────────────────────────────────────────────┤
+│ C) live-stage-hud  (static files served by LSM :3000)    │
+│    ~/Documents/projects/live-stage-hud/                  │
+│    → web/public/ — iPhone controller HTML/JS/CSS         │
+│    → web/public/hud.* — Stage teleprompter               │
+│    → scripts/dell-*.sh — Dell kiosk auto-connect         │
+│    → tools/verify-lyric-sync.js — lyric sync validator   │
+│    ⚠ tui/showman.js DELETED — was old unused tunnel TUI  │
+└──────────────────────────────────────────────────────────┘
+```
+
+**Data flow:**
+```
+REAPER → Lua runner → bridge_state.json (on disk)
+  → LSM :3000 polls → WebSocket → HUD + iPhone controller
+  → TUI polls /api/state from LSM :3000 (curl every 2s)
+  → iPhoneLiveServer :3300 independent queue/singer/library
+```
+
+**Song format:** `~/ReaperSongs/<Song>/{meta.json, song.chopro}`
+```
+@time=36.00 @bar=19  [D]Well, she was an American girl
+```
+`@time` = seconds (LRCLIB ground truth), `@bar` = bars (legacy fallback).
+
+**start-show script** (`scripts/start-show`) launches:
+1. LSM Bridge :3000 (via launchd or manual node)
+2. Singer Server :3300 (node server/index.js)
+3. TUI Dashboard (node scripts/tui.js — stays in foreground)
+4. QR codes generated to ~/Documents/projects/live-band-karaoke/
+
+**stop-show script** (`scripts/stop-show`) kills both servers and restores AWDL.
+
+---
+
 ## Session 1: Foundation + Setlist + Queue + Singer Queue — 2026-07-11
 
 `#music #iphoneliveserver #phase-setup`

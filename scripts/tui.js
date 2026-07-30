@@ -521,17 +521,17 @@ function render() {
   const onlineTag = externalStatus.online_detected ? (GREEN + ' ONLINE' + RESET) : (YELLOW + ' OFFLINE' + RESET);
   out += ESC + '1;' + (w - 50) + 'H' + '[' + modeBadge + ']' + focusTag + '  ' + onlineTag + '  ' + icon + ' ' + (serverRunning ? 'RUNNING' : 'STOPPED') + ' :' + SERVER_PORT + RESET;
   if (showMode !== 'live') {
-    out += ESC + '2;' + Math.floor((w - 35) / 2) + 'H' + YELLOW + BOLD + '  [Shift+S] Start Show to go LIVE  ' + RESET + ESC + '0K';
+    out += ESC + '2;' + Math.floor((w - 35) / 2) + 'H' + YELLOW + BOLD + '  [Shift+L] Go LIVE  [Shift+S] Stop HUD  ' + RESET + ESC + '0K';
   }
-  // System stats row
-  const statsRow = showMode === 'live' ? 2 : 3;
+  // System stats row — positioned below the two panels (ct + ch + 1)
+  const ct = showMode === 'live' ? 3 : 5, ch = 7;
+  const statsRow = ct + ch + 1;
   const netStr = sysNet < 0 ? DIM + '--ms' + RESET : (sysNet < 30 ? GREEN : sysNet < 60 ? YELLOW : RED) + sysNet + 'ms' + RESET;
   const thermStr = sysThermal === 'cool' ? GREEN + 'OK' + RESET : sysThermal === 'warm' ? YELLOW + 'WARM' + RESET : RED + 'HOT!' + RESET;
-  out += ESC + statsRow + ';' + (w - 46) + 'H' + DIM + 'CPU ' + WHITE + sysCpu + '%' + RESET + DIM + '  RAM ' + WHITE + sysRam + 'GB' + RESET + DIM + '  Temp ' + thermStr + RESET + DIM + '  Net ' + netStr + RESET + ESC + '0K';
+  out += ESC + statsRow + ';2H' + DIM + 'CPU ' + WHITE + sysCpu + '%' + RESET + DIM + '  RAM ' + WHITE + sysRam + 'GB' + RESET + DIM + '  Temp ' + thermStr + RESET + DIM + '  Net ' + netStr + RESET + ESC + '0K';
 
   const lw = Math.floor((w - 3) / 2);
   const rw = w - 3 - lw;
-  const ct = showMode === 'live' ? 3 : 5, ch = 7;
 
   // Now Playing — from REAPER bridge state
   const npHighlight = focus === 'main';
@@ -1295,17 +1295,20 @@ function handleInput(chunk) {
           });
         }
         break;
-      case 0x53: // Shift+S — Start Show or HUD stop
+      case 0x53: // Shift+S — Stop HUD
+        if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode) {
+          hudPost('stop');
+          hudReaperPlaying = false;
+          statusMsg = 'HUD stopped';
+        }
+        break;
+      case 0x4C: // Shift+L — Go LIVE (transition from connected mode)
         if (showMode === 'connected') {
           showMode = 'live';
           apiPost('/api/show-mode', { mode: 'live' }).catch(() => {});
           log('Show started — Dell HUD will activate');
           try { execSync(`bash "${SHOW_OPTIMIZE}" start`, { timeout: 5000 }); log('System optimized for live audio'); } catch(e) { log('Optimize failed: ' + e.message); }
           render();
-        } else if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode) {
-          hudPost('stop');
-          hudReaperPlaying = false;
-          statusMsg = 'HUD stopped';
         }
         break;
     }
