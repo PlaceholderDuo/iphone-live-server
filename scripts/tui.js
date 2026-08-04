@@ -586,6 +586,24 @@ function drawBox(top, left, w, h, title, highlight) {
 }
 
 function drawText(top, left, text) {
+  const cols = process.stdout.columns || 80;
+  const visible = text.replace(/\x1b\[[0-9;]*m/g, '');
+  if (visible.length > cols - left - 1) {
+    let visibleLen = 0;
+    let result = '';
+    for (let i = 0; i < text.length; i++) {
+      if (text[i] === '\x1b') {
+        const end = text.indexOf('m', i);
+        result += text.substring(i, end + 1);
+        i = end;
+        continue;
+      }
+      if (visibleLen >= cols - left - 1) break;
+      result += text[i];
+      visibleLen++;
+    }
+    return ESC + top + ';' + left + 'H' + result + ESC + '0K';
+  }
   return ESC + top + ';' + left + 'H' + text + ESC + '0K';
 }
 
