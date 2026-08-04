@@ -111,7 +111,7 @@ let wifiSSID = '';
 let wifiPassword = '';
 let lanIP = '127.0.0.1';
 let connectedClients = [];
-let showMode = 'live';
+let showMode = 'connected';
 
 function log(msg) {
   const ts = new Date().toLocaleTimeString();
@@ -613,7 +613,7 @@ function render() {
   const onlineTag = externalStatus.online_detected ? (GREEN + ' ONLINE' + RESET) : (YELLOW + ' OFFLINE' + RESET);
   out += ESC + '1;' + (w - 50) + 'H' + '[' + modeBadge + ']' + focusTag + '  ' + onlineTag + '  ' + icon + ' ' + (serverRunning ? 'RUNNING' : 'STOPPED') + ' :' + SERVER_PORT + RESET;
   if (showMode !== 'live') {
-    out += ESC + '2;' + Math.floor((w - 35) / 2) + 'H' + YELLOW + BOLD + '  [Shift+L] Go LIVE  [Shift+S] Stop HUD  ' + RESET + ESC + '0K';
+    out += ESC + '2;' + Math.floor((w - 28) / 2) + 'H' + YELLOW + BOLD + '  [Shift+S] Start the show  ' + RESET + ESC + '0K';
   }
   // System stats row — positioned below the two panels (ct + ch + 1)
   const ct = showMode === 'live' ? 3 : 5, ch = 7;
@@ -783,7 +783,8 @@ function render() {
         ? `${BOLD}[p]${RESET} Promote  ${BOLD}[x]${RESET} Remove  ${BOLD}[B]${RESET} Kick  ${BOLD}[c]${RESET} Round  ${BOLD}[a]${RESET} Add Singer`
         : `${BOLD}[Enter]${RESET} Play Now  ${BOLD}[x]${RESET} Remove  ${BOLD}[a]${RESET} Add Song`)
     : `  ${BOLD}[n]${RESET} Next  ${BOLD}[b]${RESET} Prev  ${BOLD}[Space]${RESET} Play  ${BOLD}[a]${RESET} Add`;
-  const row1 = `${navKeys}  ${queueKeys}  ${BOLD}[m]${RESET} Bumper  ${BOLD}[E]${RESET} Export  ${BOLD}[I]${RESET} Import  ${BOLD}[?]${RESET} Settings  ${BOLD}[q]${RESET} Quit${showMode === 'connected' ? `  ${BOLD}[Shift+L]${RESET} Go LIVE` : ''}`;
+  const liveLabel = showMode === 'live' ? `${GREEN}LIVE — ${BOLD}[Shift+S]${RESET}${GREEN} Stop show` : `${BOLD}[Shift+S]${RESET} Go LIVE`;
+  const row1 = `${navKeys}  ${queueKeys}  ${BOLD}[m]${RESET} Bumper  ${BOLD}[E]${RESET} Export  ${BOLD}[I]${RESET} Import  ${BOLD}[?]${RESET} Settings  ${BOLD}[q]${RESET} Quit  ${liveLabel}`;
   const row2 = `${karaokeLabel}  ${netLabel}  ${BOLD}[[]${RESET}${BOLD}[]]${RESET} Seek 5s  ${BOLD}[e]${RESET} Sync  ${BOLD}[w]${RESET} WiFi  ${BOLD}[v]${RESET} Verify  ${BOLD}[r]${RESET} Restart`;
   out += drawText(at + 1, 3, row1);
   out += drawText(at + 2, 3, row2);
@@ -1516,19 +1517,23 @@ function handleInput(chunk) {
           });
         }
         break;
-      case 0x53: // Shift+S — Stop HUD
+      case 0x53: // Shift+S — toggle LIVE / SETUP
         if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode) {
-          hudPost('stop');
-          hudReaperPlaying = false;
-          statusMsg = 'HUD stopped';
-        }
-        break;
-      case 0x4C: // Shift+L — Go LIVE (transition from connected mode)
-        if (showMode === 'connected') {
-          showMode = 'live';
-          apiPost('/api/show-mode', { mode: 'live' }).catch(() => {});
-          log('Show started — Dell HUD will activate');
-          try { execSync(`bash "${SHOW_OPTIMIZE}" start`, { timeout: 5000 }); log('System optimized for live audio'); } catch(e) { log('Optimize failed: ' + e.message); }
+          if (showMode === 'live') {
+            showMode = 'connected';
+            hudPost('stop');
+            hudReaperPlaying = false;
+            try { execSync(`bash "${SHOW_OPTIMIZE}" stop`, { timeout: 5000 }); } catch(e) {}
+            apiPost('/api/show-mode', { mode: 'connected' }).catch(() => {});
+            log('Show stopped — SETUP mode');
+            statusMsg = 'SETUP mode';
+          } else {
+            showMode = 'live';
+            try { execSync(`bash "${SHOW_OPTIMIZE}" start`, { timeout: 5000 }); log('System optimized for live audio'); } catch(e) { log('Optimize failed: ' + e.message); }
+            apiPost('/api/show-mode', { mode: 'live' }).catch(() => {});
+            log('Show started — HUD LIVE');
+            statusMsg = 'LIVE — HUD active';
+          }
           render();
         }
         break;
