@@ -1458,6 +1458,10 @@ function handleInput(chunk) {
           }
         }
         break;
+      case 0x61: // a — add song to queue
+        if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode)
+          enterSearchMode('add');
+        break;
       case 0x6E: // n — load next
         if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode)
           doAction('next');

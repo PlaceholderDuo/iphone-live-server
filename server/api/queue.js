@@ -431,6 +431,7 @@ function queueRoutes(app) {
     }
     if (entries.length === 0) return res.status(404).json({ error: 'Singer not found in queue' });
     q.banned_singers.push(trimmedSinger);
+    logBanned(trimmedSinger, entries);
     saveQueue(q);
     res.json({ ok: true, removed: entries.length, singer: trimmedSinger });
   });

@@ -1,108 +1,25 @@
 {
-  "main_queue": [
-    {
-      "slug": "A Boy Named Sue",
-      "title": "A Boy Named Sue",
-      "artist": "Johnny Cash",
-      "key": "Bb",
-      "bpm": 120,
-      "singer": "Placeholder Duo",
-      "band_song": true,
-      "timestamp": 1784005806790
-    }
-  ],
+  "main_queue": [],
   "active_rotation": [],
-  "waiting_list": [
-    {
-      "id": "mrk6voqchqgq",
-      "singer": "Danny",
-      "song_slug": "MR JONES",
-      "song_title": "MR JONES",
-      "song_artist": "Counting Crows",
-      "timestamp": 1784005612788,
-      "round": 1,
-      "ip": "192.168.1.215"
-    }
-  ],
+  "waiting_list": [],
   "band_queue": [
-    {
-      "slug": "Changes In Latitudes Changes In Attitudes",
-      "title": "Changes In Latitudes Changes In Attitudes",
-      "artist": "Jimmy Buffett",
-      "key": "D",
-      "bpm": 120,
-      "timestamp": 1784173119891
-    },
-    {
-      "slug": "Im on Fire",
-      "title": "Im on Fire",
-      "artist": "Bruce Springsteen",
-      "key": "E",
-      "bpm": 120,
-      "timestamp": 1784173130304
-    },
-    {
-      "slug": "Addicted to Love",
-      "title": "Addicted to Love",
-      "artist": "Robert Palmer",
-      "key": "A",
-      "bpm": 120,
-      "timestamp": 1784173145828
-    },
-    {
-      "slug": "(I Can't Get No) Satisfaction",
-      "title": "(I Can't Get No) Satisfaction",
-      "artist": "The Rolling Stones",
-      "key": "E",
-      "bpm": 120,
-      "timestamp": 1784173185832
-    },
-    {
-      "slug": "Miss You",
-      "title": "Miss You",
-      "artist": "The Rolling Stones",
-      "key": "Am",
-      "bpm": 120,
-      "timestamp": 1784173308885
-    },
-    {
-      "slug": "Just Got Paid",
-      "title": "Just Got Paid",
-      "artist": "ZZ Top",
-      "key": "E",
-      "bpm": 120,
-      "timestamp": 1784173336488
-    },
     {
       "slug": "Don't Let Me Down",
       "title": "Don't Let Me Down",
       "artist": "The Beatles",
       "key": "E",
-      "bpm": 120,
-      "timestamp": 1784173359682
-    },
-    {
-      "slug": "Come Together",
-      "title": "Come Together",
-      "artist": "The Beatles",
-      "key": "Dm",
-      "bpm": 120,
-      "timestamp": 1784173401990
+      "bpm": 80,
+      "timestamp": 1785635491734
     }
   ],
-  "current_index": 0,
-  "status": "playing",
-  "current_song": {
-    "slug": "A Boy Named Sue",
-    "title": "A Boy Named Sue",
-    "artist": "Johnny Cash",
-    "key": "Bb",
-    "bpm": 120,
-    "singer": "Placeholder Duo",
-    "band_song": true,
-    "timestamp": 1784005806790
-  },
+  "current_index": -1,
+  "status": "stopped",
+  "current_song": null,
   "round": 1,
   "promote_count": 0,
-  "banned_singers": []
+  "banned_singers": [
+    "Danny",
+    "Bad Actor",
+    "Sarah"
+  ]
 }

@@ -93,6 +93,7 @@ const FALSE_POSITIVES = new Set([
   'light', 'night', 'right', 'tight', 'sight', 'might', 'fight',
   'homestead', 'homesteader',
   'title', 'tittle',
+  'mike', 'michael',
 ]);
 
 function normalize(text) {

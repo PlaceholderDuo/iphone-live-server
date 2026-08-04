@@ -353,13 +353,14 @@ async function loadMySongs() {
     var isActive = active.some(function(a) { return a.id === s.id; });
     var label = isActive ? 'In Rotation' : 'Waiting';
     var cls = isActive ? 'current' : 'next-round';
-    html += '<div class="song-slot ' + cls + '" data-id="' + s.id + '" data-active="' + isActive + '" onclick="openSongModal(this)">' +
+    var pos = entries.indexOf(s);
+    html += '<div class="song-slot ' + cls + '" data-id="' + s.id + '" data-pos="' + pos + '" data-active="' + isActive + '" onclick="openSongModal(this)">' +
       '<div>' +
       '<div class="slot-num">' + label + '</div>' +
       '<div class="slot-title">' + esc(s.song_title) + '</div>' +
       '<div class="slot-artist">' + esc(s.song_artist) + '</div>' +
       '</div>' +
-      (isActive && active.indexOf(s) >= 3 ? '<div class="slot-arrow">&#9654;</div>' : '') +
+      (isActive && pos >= 3 ? '<div class="slot-arrow">&#9654;</div>' : '') +
       '</div>';
   });
   slotsEl.innerHTML = html;
@@ -388,6 +389,7 @@ function openSongModal(el) {
   var id = el.dataset.id;
   var pos = parseInt(el.dataset.pos);
   var isActive = el.dataset.active === 'true';
+  currentModalId = id;
   var title = el.querySelector('.slot-title').textContent;
   var artist = el.querySelector('.slot-artist').textContent;
 
@@ -423,10 +425,11 @@ document.getElementById('modalOverlay').addEventListener('click', function(e) {
 
 function changeSong() {
   closeModal();
-  const slot = document.querySelector('.song-slot.current[data-id], .song-slot.next-round[data-id]');
-  const id = slot ? slot.dataset.id : null;
+  var id = currentModalId;
   if (id) goStep2ForChange(id);
 }
+
+var currentModalId = null;
 
 function confirmLeave() {
   document.getElementById('modalOverlay').classList.add('show');
