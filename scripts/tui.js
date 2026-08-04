@@ -484,6 +484,24 @@ async function doAction(action, arg) {
     case 'play-now':
       if (arg !== undefined) result = await apiPost('/api/band-queue/promote', { index: arg });
       break;
+    case 'play-band-now':
+      if (arg !== undefined) {
+        // Promote into main_queue
+        await apiPost('/api/band-queue/promote', { index: arg });
+        // Load it as current song
+        const r = await apiPost('/api/queue/load-next');
+        const song = r?.song;
+        if (song) {
+          // Start queue playback
+          result = await apiPost('/api/queue/play');
+          // Push setlist + start HUD
+          const songs = (queueState.band_queue || []).map(s => ({ title: s.title }));
+          if (songs.length > 0) await hudPost('setlist', { songs });
+          await hudPost('load', { title: song.title });
+          await hudPost('play');
+        }
+      }
+      break;
     case 'clear-round-confirm':
       result = await apiPost('/api/singer/clear-round');
       break;
@@ -1441,9 +1459,15 @@ function handleInput(chunk) {
           render();
         }
         break;
-      case 0x49: // I — import setlist
-        if (inputMode || confirmMode || showWifiInfo) break;
-        enterSetlistMode();
+      case 0x0D: // Enter — Play Now (setlist view)
+        if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode) {
+          if (focus === 'queue' && queueView !== 'singers') {
+            const sl = queueState.band_queue || [];
+            if (sl.length > 0 && bandCursor >= 0 && bandCursor < sl.length) {
+              doAction('play-band-now', bandCursor);
+            }
+          }
+        }
         break;
       case 0x42: // B — kick/ban singer (singers view only)
         if (focus === 'queue' && queueView === 'singers') {
@@ -1485,9 +1509,13 @@ function handleInput(chunk) {
           }
         }
         break;
-      case 0x61: // a — add song to queue
-        if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode)
-          enterSearchMode('add');
+      case 0x61: // a — add song/singer (context-aware)
+        if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode) {
+          if (focus === 'queue' && queueView === 'singers')
+            enterSearchMode('add-singer');
+          else
+            enterSearchMode('add');
+        }
         break;
       case 0x6E: // n — load next
         if (!inputMode && !confirmMode && !setlistMode && !settingsMode && !exportMode)
