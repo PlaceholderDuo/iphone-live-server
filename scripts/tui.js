@@ -571,17 +571,19 @@ async function doAction(action, arg) {
 
 function drawBox(top, left, w, h, title, highlight) {
   const hc = '-', v = '|';
-  const titleStr = title ? ` ${title} ` : '';
-  const pad = w - 2 - titleStr.length;
+  const titleVis = (title || '').replace(/\x1b\[[0-9;]*m/g, '');
+  const titleStr = titleVis.length > 0 ? ` ${titleVis} ` : '';
+  const pad = Math.max(0, w - 2 - titleStr.length);
   const lp = Math.floor(pad / 2), rp = pad - lp;
   const borderColor = highlight ? CYAN : ORANGE;
+  const titleOut = title ? (' ' + BOLD + title + ' ' + RESET) : titleStr;
   let out = '';
-  out += ESC + top + ';' + left + 'H' + borderColor + '+' + hc.repeat(lp) + RESET + (title ? ' ' + BOLD + title + ' ' + RESET : '') + borderColor + hc.repeat(rp) + '+' + RESET;
+  out += ESC + top + ';' + left + 'H' + borderColor + '+' + hc.repeat(lp) + RESET + titleOut + borderColor + hc.repeat(rp) + '+' + RESET;
   for (let r = 1; r <= h - 2; r++) {
     out += ESC + (top + r) + ';' + left + 'H' + borderColor + v + RESET;
     out += ESC + (top + r) + ';' + (left + w - 1) + 'H' + borderColor + v + RESET;
   }
-  out += ESC + (top + h - 1) + ';' + left + 'H' + borderColor + '+' + hc.repeat(w - 2) + '+' + RESET;
+  out += ESC + (top + h - 1) + ';' + left + 'H' + borderColor + '+' + hc.repeat(Math.max(0, w - 2)) + '+' + RESET;
   return out;
 }
 
@@ -601,7 +603,7 @@ function render() {
   const rows = process.stdout.rows || 30;
   const w = cols;
 
-  let out = HIDE;
+  let out = HIDE + CLS;
 
   // Title bar
   const icon = serverRunning ? (GREEN + '●' + RESET) : (RED + '●' + RESET);
