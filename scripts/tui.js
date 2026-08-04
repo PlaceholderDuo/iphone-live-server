@@ -461,7 +461,7 @@ async function doAction(action, arg) {
     case 'clear': result = await apiPost('/api/queue/clear'); break;
     case 'clear-round': result = await apiPost('/api/singer/clear-round'); break;
     case 'add':
-      if (arg) result = await apiPost('/api/queue/add', { slug: arg });
+      if (arg) result = await apiPost('/api/band-queue/add', { slug: arg });
       break;
     case 'add-singer':
       if (arg) result = await apiPost('/api/singer/add', { singer: 'Band', song_slug: arg });

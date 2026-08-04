@@ -1,5 +1,24 @@
 {
-  "main_queue": [],
+  "main_queue": [
+    {
+      "slug": "(Sittin on) The dock of the bay",
+      "title": "(Sittin on) The dock of the bay",
+      "artist": "Otis Redding ",
+      "key": "G",
+      "bpm": 120,
+      "timestamp": 1785875590280,
+      "duplicate": false
+    },
+    {
+      "slug": "ACHY BREAKY HEART",
+      "title": "ACHY BREAKY HEART",
+      "artist": "Billy Ray Cyrus",
+      "key": "A",
+      "bpm": 63,
+      "timestamp": 1785875594821,
+      "duplicate": false
+    }
+  ],
   "active_rotation": [],
   "waiting_list": [],
   "band_queue": [
