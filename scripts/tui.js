@@ -886,7 +886,7 @@ function renderSearch() {
   const rows = process.stdout.rows || 30;
   const w = cols;
 
-  let out = HIDE;
+  let out = HIDE + CLS;
 
   if (nameInputMode) {
     const boxW = Math.min(50, w - 4);
