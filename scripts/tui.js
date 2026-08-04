@@ -586,24 +586,6 @@ function drawBox(top, left, w, h, title, highlight) {
 }
 
 function drawText(top, left, text) {
-  const cols = process.stdout.columns || 80;
-  const visible = text.replace(/\x1b\[[0-9;]*m/g, '');
-  if (visible.length > cols - left - 1) {
-    let visibleLen = 0;
-    let result = '';
-    for (let i = 0; i < text.length; i++) {
-      if (text[i] === '\x1b') {
-        const end = text.indexOf('m', i);
-        result += text.substring(i, end + 1);
-        i = end;
-        continue;
-      }
-      if (visibleLen >= cols - left - 1) break;
-      result += text[i];
-      visibleLen++;
-    }
-    return ESC + top + ';' + left + 'H' + result + ESC + '0K';
-  }
   return ESC + top + ';' + left + 'H' + text + ESC + '0K';
 }
 
@@ -904,6 +886,23 @@ function renderSearch() {
   const rows = process.stdout.rows || 30;
   const w = cols;
 
+  function clip(text, max) {
+    const visible = text.replace(/\x1b\[[0-9;]*m/g, '');
+    if (visible.length <= max) return text;
+    let result = '', vi = 0;
+    for (let i = 0; i < text.length && vi < max; i++) {
+      if (text[i] === '\x1b') {
+        const end = text.indexOf('m', i);
+        result += text.substring(i, end + 1);
+        i = end;
+        continue;
+      }
+      result += text[i];
+      vi++;
+    }
+    return result + RESET;
+  }
+
   let out = HIDE + CLS;
 
   if (nameInputMode) {
@@ -912,40 +911,47 @@ function renderSearch() {
     const bx = Math.floor((w - boxW) / 2);
     const by = Math.floor(rows / 2) - 2;
     out += drawBox(by, bx, boxW, boxH, '');
-    out += drawText(by + 1, bx + 2, BOLD + `Adding "${(nameInputFor?.title || 'song').substring(0, boxW - 18)}"` + RESET);
-    out += drawText(by + 2, bx + 2, `${BOLD}Singer name:${RESET} ` + CYAN + nameInputBuffer + (nameInputBuffer.length < boxW - 18 ? '█' : '') + RESET);
+    out += drawText(by + 1, bx + 2, clip(BOLD + `Adding "${(nameInputFor?.title || 'song')}"` + RESET, w - bx - 3));
+    out += drawText(by + 2, bx + 2, clip(`${BOLD}Singer name:${RESET} ` + CYAN + nameInputBuffer + (nameInputBuffer.length < boxW - 18 ? '█' : '') + RESET, w - bx - 3));
     out += drawText(by + 3, bx + 2, DIM + 'Enter submit  Esc cancel' + RESET);
     process.stdout.write(out);
     return;
   }
 
+  const boxW = Math.min(Math.max(50, w - 24), w - 4);
   const boxH = Math.min(rows - 2, 22);
-  const boxTop = Math.max(1, Math.floor((rows - boxH) / 2));
+  const bx = Math.floor((w - boxW) / 2);
+  const by = Math.max(1, Math.floor((rows - boxH) / 2));
 
-  out += drawBox(boxTop, 2, w - 3, boxH, inputPrompt.toUpperCase());
-  out += drawText(boxTop + 1, 4, `${BOLD}Search songs by title or artist:${RESET}`);
+  out += drawBox(by, bx, boxW, boxH, clip(inputPrompt.toUpperCase(), boxW - 4));
+  out += drawText(by + 1, bx + 2, clip(BOLD + 'Search songs by title or artist:' + RESET, w - bx - 3));
 
-  const inputLine = boxTop + 2;
-  out += drawText(inputLine, 4, CYAN + '> ' + inputBuffer + (inputBuffer.length < w - 12 ? '█' : '') + RESET);
-  out += drawText(inputLine, 4 + Math.min(inputBuffer.length, w - 20) + 3, ' '.repeat(Math.max(0, w - 14 - inputBuffer.length)) + '  ' + DIM + `${searchResults.length} results` + RESET);
+  const inputLine = by + 2;
+  const inputMax = boxW - 5;
+  const visible = inputBuffer.length > inputMax ? inputBuffer.slice(-inputMax) : inputBuffer;
+  out += drawText(inputLine, bx + 2, CYAN + '> ' + visible + (visible.length < inputMax ? '█' : '') + RESET);
 
-  const resTop = boxTop + 4;
+  out += drawText(inputLine, bx + boxW - ' results'.length - 10, DIM + searchResults.length + ' results' + RESET);
+
+  const resTop = by + 4;
   const resH = boxH - 7;
   const page = searchResults.slice(0, resH);
   for (let i = 0; i < resH; i++) {
-    const l = boxTop + 4 + i;
+    const l = by + 4 + i;
     if (i < page.length) {
       const s = page[i];
-      const name = (s.title + '  ' + DIM + s.artist + RESET + '  ' + (s.key || '')).substring(0, w - 14);
+      const keyStr = s.key ? ' [' + GREEN + s.key + RESET + ']' : '';
+      const keyVis = s.key ? (' [' + s.key + ']').length : 0;
+      const name = clip(s.title || '', boxW - keyVis - 10) + '  ' + DIM + clip(s.artist || '', 15) + RESET + keyStr;
       const cur = searchCursor === i ? (INV + ' ' + RESET) : ' ';
-      out += drawText(l, 4, cur + ' ' + (searchCursor === i ? BOLD : '') + name + (searchCursor === i ? RESET : ''));
+      out += drawText(l, bx + 2, cur + ' ' + (searchCursor === i ? BOLD : '') + clip(name, boxW - 6) + (searchCursor === i ? RESET : ''));
     } else {
-      out += drawText(l, 4, ' '.repeat(w - 8));
+      out += drawText(l, bx + 2, ' '.repeat(boxW - 4));
     }
   }
 
-  const foot = boxTop + boxH - 2;
-  out += drawText(foot, 4, DIM + '↑↓ navigate  Enter add  Esc cancel  type to search' + RESET);
+  const foot = by + boxH - 2;
+  out += drawText(foot, bx + 2, DIM + '↑↓ navigate  Enter add  Esc cancel  type to search' + RESET);
   process.stdout.write(out);
 }
 
