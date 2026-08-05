@@ -128,6 +128,7 @@ function apiGet(path) {
       res.on('data', c => data += c);
       res.on('end', () => { try { resolve(JSON.parse(data)); } catch { resolve(null); } });
     });
+    req.setTimeout(5000, () => { req.destroy(); resolve(null); });
     req.on('error', () => resolve(null));
     req.end();
   });
@@ -147,6 +148,7 @@ function apiPost(path, body, method) {
       res.on('data', c => d += c);
       res.on('end', () => { try { resolve(JSON.parse(d)); } catch { resolve(null); } });
     });
+    req.setTimeout(5000, () => { req.destroy(); resolve(null); });
     req.on('error', () => resolve(null));
     req.write(data);
     req.end();
@@ -414,6 +416,7 @@ function hudPost(action, body) {
       res.on('data', c => d += c);
       res.on('end', () => { try { resolve(JSON.parse(d)); } catch { resolve(null); } });
     });
+    req.setTimeout(5000, () => { req.destroy(); resolve(null); });
     req.on('error', () => resolve(null));
     req.write(data);
     req.end();

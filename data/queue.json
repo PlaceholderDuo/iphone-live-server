@@ -10,6 +10,26 @@
       "duplicate": false
     },
     {
+      "slug": "867-5309 Jenny",
+      "title": "867-5309 Jenny",
+      "artist": "Tommy Tutone",
+      "key": "F#m",
+      "bpm": 71,
+      "singer": "Placeholder Duo",
+      "band_song": true,
+      "timestamp": 1785880274623
+    },
+    {
+      "slug": "(I Can't Get No) Satisfaction",
+      "title": "(I Can't Get No) Satisfaction",
+      "artist": "The Rolling Stones",
+      "key": "E",
+      "bpm": 71,
+      "singer": "Placeholder Duo",
+      "band_song": true,
+      "timestamp": 1785880278866
+    },
+    {
       "slug": "ACHY BREAKY HEART",
       "title": "ACHY BREAKY HEART",
       "artist": "Billy Ray Cyrus",
@@ -17,6 +37,16 @@
       "bpm": 63,
       "timestamp": 1785875594821,
       "duplicate": false
+    },
+    {
+      "slug": "ACHY BREAKY HEART",
+      "title": "ACHY BREAKY HEART",
+      "artist": "Billy Ray Cyrus",
+      "key": "A",
+      "bpm": 63,
+      "singer": "Placeholder Duo",
+      "band_song": true,
+      "timestamp": 1785880263611
     }
   ],
   "active_rotation": [],
@@ -39,36 +69,12 @@
       "timestamp": 1785875879957
     },
     {
-      "slug": "ACHY BREAKY HEART",
-      "title": "ACHY BREAKY HEART",
-      "artist": "Billy Ray Cyrus",
-      "key": "A",
-      "bpm": 63,
-      "timestamp": 1785875883954
-    },
-    {
       "slug": "After Midnight",
       "title": "After Midnight",
       "artist": "Eric Clapton",
       "key": "C",
       "bpm": 98,
       "timestamp": 1785875893125
-    },
-    {
-      "slug": "(I Can't Get No) Satisfaction",
-      "title": "(I Can't Get No) Satisfaction",
-      "artist": "The Rolling Stones",
-      "key": "E",
-      "bpm": 71,
-      "timestamp": 1785875927148
-    },
-    {
-      "slug": "867-5309 Jenny",
-      "title": "867-5309 Jenny",
-      "artist": "Tommy Tutone",
-      "key": "F#m",
-      "bpm": 71,
-      "timestamp": 1785877593327
     },
     {
       "slug": "A Boy Named Sue",
@@ -79,9 +85,18 @@
       "timestamp": 1785879143141
     }
   ],
-  "current_index": -1,
-  "status": "stopped",
-  "current_song": null,
+  "current_index": 2,
+  "status": "playing",
+  "current_song": {
+    "slug": "(I Can't Get No) Satisfaction",
+    "title": "(I Can't Get No) Satisfaction",
+    "artist": "The Rolling Stones",
+    "key": "E",
+    "bpm": 71,
+    "singer": "Placeholder Duo",
+    "band_song": true,
+    "timestamp": 1785880278866
+  },
   "round": 1,
   "promote_count": 0,
   "banned_singers": [
