@@ -4,8 +4,13 @@ const fs = require('fs');
 const SETLISTS_DIR = path.resolve(__dirname, '..', '..', 'data', 'setlists');
 
 function getSetlistFile(name) {
-  if (path.extname(name)) return path.join(SETLISTS_DIR, name);
-  return path.join(SETLISTS_DIR, name + '.txt');
+  // Prevent directory traversal
+  if (!name || typeof name !== 'string' || name.includes('..') || name.includes('/') || name.includes('\\')) return null;
+  const fname = path.extname(name) ? name : name + '.txt';
+  const resolved = path.resolve(SETLISTS_DIR, fname);
+  // Must resolve to something inside SETLISTS_DIR
+  if (!resolved.startsWith(SETLISTS_DIR + path.sep)) return null;
+  return resolved;
 }
 
 function listSetlists() {
@@ -32,6 +37,7 @@ function countSongs(filename) {
 
 function exportSetlist(name, songs) {
   const filePath = getSetlistFile(name);
+  if (!filePath) return null;
   const lines = [`# ${name} — exported ${new Date().toISOString().split('T')[0]}`, ''];
   for (const s of songs) {
     lines.push(s.slug);
@@ -42,7 +48,7 @@ function exportSetlist(name, songs) {
 
 function importSetlist(name) {
   const filePath = getSetlistFile(name);
-  if (!fs.existsSync(filePath)) return null;
+  if (!filePath || !fs.existsSync(filePath)) return null;
   const content = fs.readFileSync(filePath, 'utf-8');
   const slugs = content.split('\n')
     .map(l => l.trim())
@@ -52,7 +58,7 @@ function importSetlist(name) {
 
 function deleteSetlist(name) {
   const filePath = getSetlistFile(name);
-  if (!fs.existsSync(filePath)) return false;
+  if (!filePath || !fs.existsSync(filePath)) return false;
   fs.unlinkSync(filePath);
   return true;
 }

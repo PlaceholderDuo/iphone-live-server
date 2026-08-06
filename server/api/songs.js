@@ -33,6 +33,8 @@ function listSongs() {
 }
 
 function getSong(slug) {
+  // Prevent directory traversal
+  if (!slug || typeof slug !== 'string' || slug.includes('..') || slug.includes('/') || slug.includes('\\')) return null;
   const songPath = path.join(SONGS_DIR, slug);
   if (!fs.existsSync(songPath)) return null;
   const metaPath = path.join(songPath, 'meta.json');
@@ -42,12 +44,20 @@ function getSong(slug) {
   return { slug, meta };
 }
 
+// Song index cache — built once, invalidated via touch
+let _cachedIndex = null;
+let _indexCacheTime = 0;
+const INDEX_CACHE_TTL = 30000; // 30 seconds
+
 function buildSongIndex() {
+  // Return cached index if fresh
+  if (_cachedIndex && Date.now() - _indexCacheTime < INDEX_CACHE_TTL) return _cachedIndex;
+  
   const entries = listSongs();
   const genreMap = loadGenreMap();
   const keyFallback = loadKeyFallback();
   const seen = new Set();
-  return entries
+  _cachedIndex = entries
     .filter(entry => {
       const metaPath = path.join(entry.path, 'meta.json');
       return fs.existsSync(metaPath);
@@ -76,6 +86,8 @@ function buildSongIndex() {
       seen.add(dedupeKey);
       return true;
     });
+  _indexCacheTime = Date.now();
+  return _cachedIndex;
 }
 
 function songsRoutes(app) {
