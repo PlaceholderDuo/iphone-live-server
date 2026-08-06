@@ -83,6 +83,52 @@ function authRoutes(app) {
     saveConfig(cfg);
     res.json({ ok: true, max_songs_between_band: cfg.max_songs_between_band });
   });
+
+  app.get('/api/config/teleprompter', (req, res) => {
+    const cfg = loadConfig();
+    const defaults = {
+      scroll_device: 'none',
+      left_button_mode: 'rewind_5s',
+      right_button_mode: 'skip_5s',
+      third_button_mode: 'pause',
+      chord_color_mode: 'circle'
+    };
+    res.json(Object.assign({}, defaults, cfg.teleprompter || {}));
+  });
+
+  app.post('/api/config/teleprompter', (req, res) => {
+    const cfg = loadConfig();
+    const { scroll_device, left_button_mode, right_button_mode, third_button_mode, chord_color_mode } = req.body || {};
+    if (!cfg.teleprompter) cfg.teleprompter = {};
+    if (scroll_device !== undefined) cfg.teleprompter.scroll_device = scroll_device;
+    if (left_button_mode !== undefined) cfg.teleprompter.left_button_mode = left_button_mode;
+    if (right_button_mode !== undefined) cfg.teleprompter.right_button_mode = right_button_mode;
+    if (third_button_mode !== undefined) cfg.teleprompter.third_button_mode = third_button_mode;
+    if (chord_color_mode !== undefined && (chord_color_mode === 'circle' || chord_color_mode === 'flavor')) {
+      cfg.teleprompter.chord_color_mode = chord_color_mode;
+    }
+    saveConfig(cfg);
+    res.json({ ok: true, teleprompter: cfg.teleprompter });
+  });
+
+  app.get('/api/config/tempo-sync', (req, res) => {
+    const cfg = loadConfig();
+    const defaults = {
+      beat1_behavior: 'no_distinction',
+      beat_color: 'green'
+    };
+    res.json(Object.assign({}, defaults, cfg.tempo_sync || {}));
+  });
+
+  app.post('/api/config/tempo-sync', (req, res) => {
+    const cfg = loadConfig();
+    const { beat1_behavior, beat_color } = req.body || {};
+    if (!cfg.tempo_sync) cfg.tempo_sync = {};
+    if (beat1_behavior !== undefined) cfg.tempo_sync.beat1_behavior = beat1_behavior;
+    if (beat_color !== undefined) cfg.tempo_sync.beat_color = beat_color;
+    saveConfig(cfg);
+    res.json({ ok: true, tempo_sync: cfg.tempo_sync });
+  });
 }
 
 function saveConfig(cfg) {

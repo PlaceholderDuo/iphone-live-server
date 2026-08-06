@@ -112,6 +112,88 @@ let wifiPassword = '';
 let lanIP = '127.0.0.1';
 let connectedClients = [];
 let showMode = 'connected';
+let settingsBarFocus = false;
+let settingsBarCursor = 0;
+let settingsMenuMode = false;
+let settingsMenuPage = 0;
+let settingsMenuCursor = 0;
+let settingsMenuField = null;
+let settingsMenuValue = '';
+let telepromptConfig = {
+  scroll_device: 'none',
+  left_button_mode: 'rewind_5s',
+  right_button_mode: 'skip_5s',
+  third_button_mode: 'pause',
+  chord_color_mode: 'circle'
+};
+let tempoSyncConfig = {
+  beat1_behavior: 'no_distinction',
+  beat_color: 'green'
+};
+
+const SETTINGS_BAR_ITEMS = ['Settings'];
+const SETTINGS_PAGES = ['General', 'Teleprompter', 'Karaoke'];
+
+const SCROLL_DEVICE_OPTIONS = [
+  { value: 'none', label: 'None' },
+  { value: 'bluetooth', label: 'Bluetooth' },
+  { value: 'osc', label: 'OSC' },
+  { value: 'web_control', label: 'Web Control' }
+];
+
+const LEFT_BUTTON_OPTIONS = [
+  { value: 'rewind_2s', label: 'Rewind 2 seconds' },
+  { value: 'rewind_5s', label: 'Rewind 5 seconds' },
+  { value: 'rewind_10s', label: 'Rewind 10 seconds' },
+  { value: 'restart_section', label: 'Restart Section' }
+];
+
+const RIGHT_BUTTON_OPTIONS = [
+  { value: 'skip_2s', label: 'Skip 2 seconds' },
+  { value: 'skip_5s', label: 'Skip 5 seconds' },
+  { value: 'skip_10s', label: 'Skip 10 seconds' },
+  { value: 'next_section', label: 'Next Section' }
+];
+
+const THIRD_BUTTON_OPTIONS = [
+  { value: 'pause', label: 'Pause' },
+  { value: 'rewind_2s', label: 'Rewind 2 seconds' },
+  { value: 'rewind_5s', label: 'Rewind 5 seconds' },
+  { value: 'prev_section', label: 'Previous Section' },
+  { value: 'next_section', label: 'Next Section' },
+  { value: 'hold_right_next_song', label: 'Hold + Right = Next Song' },
+  { value: 'hold_left_prev_song', label: 'Hold + Left = Previous Song' }
+];
+
+const TELEPROMPTER_FIELDS = [
+  { key: 'scroll_device', label: 'Scroll / Page Turner device', options: SCROLL_DEVICE_OPTIONS },
+  { key: 'left_button_mode', label: 'Left Button Mode', options: LEFT_BUTTON_OPTIONS, dependsOn: 'scroll_device', dependsValue: 'none', invert: true },
+  { key: 'right_button_mode', label: 'Right Button Mode', options: RIGHT_BUTTON_OPTIONS, dependsOn: 'scroll_device', dependsValue: 'none', invert: true },
+  { key: 'third_button_mode', label: '3rd Button Mode', options: THIRD_BUTTON_OPTIONS, dependsOn: 'scroll_device', dependsValue: 'none', invert: true }
+];
+
+const BEAT1_OPTIONS = [
+  { value: 'no_distinction', label: 'No distinction' },
+  { value: 'red', label: 'Red' },
+  { value: 'blue', label: 'Blue' },
+  { value: 'purple', label: 'Purple' },
+  { value: 'white', label: 'White' },
+  { value: 'orange', label: 'Orange' },
+  { value: 'green', label: 'Green' }
+];
+
+const BEAT_COLOR_OPTIONS = [
+  { value: 'red', label: 'Red' },
+  { value: 'blue', label: 'Blue' },
+  { value: 'purple', label: 'Purple' },
+  { value: 'orange', label: 'Orange' },
+  { value: 'green', label: 'Green' }
+];
+
+const GENERAL_FIELDS = [
+  { key: 'beat1_behavior', label: 'Tempo beat 1 behavior', options: BEAT1_OPTIONS },
+  { key: 'beat_color', label: 'Tempo beat color', options: BEAT_COLOR_OPTIONS }
+];
 
 function log(msg) {
   const ts = new Date().toLocaleTimeString();
@@ -222,6 +304,8 @@ async function refreshState() {
   if (ks) { karaokeEnabled = ks.karaoke_enabled; karaokePausedMsg = ks.karaoke_paused_message || ''; }
   const cfg = await apiGet('/api/config');
   if (cfg && cfg.max_songs_between_band !== undefined) maxSongsBetweenBand = cfg.max_songs_between_band || 0;
+  await refreshTelepromptConfig();
+  await refreshTempoSyncConfig();
   await refreshReaperState();
   await refreshSyncHealth();
   await refreshClients();
@@ -381,6 +465,34 @@ function refreshThermal() {
       }
     }
   });
+}
+
+async function refreshTelepromptConfig() {
+  const cfg = await apiGet('/api/config/teleprompter');
+  if (cfg) {
+    telepromptConfig.scroll_device = cfg.scroll_device || 'none';
+    telepromptConfig.left_button_mode = cfg.left_button_mode || 'rewind_5s';
+    telepromptConfig.right_button_mode = cfg.right_button_mode || 'skip_5s';
+    telepromptConfig.third_button_mode = cfg.third_button_mode || 'pause';
+    telepromptConfig.chord_color_mode = cfg.chord_color_mode || 'circle';
+  }
+}
+
+async function saveTelepromptConfig() {
+  await apiPost('/api/config/teleprompter', telepromptConfig);
+}
+
+async function refreshTempoSyncConfig() {
+  const cfg = await apiGet('/api/config/tempo-sync');
+  if (cfg) {
+    tempoSyncConfig.beat1_behavior = cfg.beat1_behavior || 'no_distinction';
+    tempoSyncConfig.beat_color = cfg.beat_color || 'green';
+  }
+}
+
+async function saveTempoSyncConfig() {
+  const r = await apiPost('/api/config/tempo-sync', tempoSyncConfig);
+  if (r && r.ok) log('Tempo sync settings saved');
 }
 
 function bumperPost(action) {
@@ -619,6 +731,7 @@ function render() {
   if (showPreflight) { renderPreflight(); return; }
   if (setlistMode) { renderSetlistPicker(); return; }
   if (settingsMode || exportMode) { renderSettings(); return; }
+  if (settingsMenuMode) { renderSettingsMenu(); return; }
 
   const cols = process.stdout.columns || 80;
   const rows = process.stdout.rows || 30;
@@ -814,12 +927,35 @@ function render() {
 
   // Log
   const lt = at + ah;
-  const lh = Math.max(2, rows - lt - 1);
+  const lh = Math.max(2, rows - lt - 2);
   out += drawBox(lt, 1, w - 1, lh, 'LOG');
   const vl = logs.slice(-(lh - 2));
   for (let i = 0; i < Math.min(vl.length, lh - 2); i++) {
     out += drawText(lt + 1 + i, 3, DIM + vl[i].substring(0, w - 4) + RESET);
   }
+
+  // Settings Bar — last row
+  const sb = rows;
+  const sbf = settingsBarFocus;
+  const sbc = settingsBarCursor;
+  const barBg = sbf ? CYAN : DIM;
+  const barText = sbf ? WHITE + BOLD : WHITE;
+  out += ESC + sb + ';1H' + ESC + '0K';
+  out += ESC + sb + ';1H' + DIM + '─── Settings ──' + RESET;
+  out += ESC + sb + ';18H';
+  for (let i = 0; i < SETTINGS_BAR_ITEMS.length; i++) {
+    const isActive = sbf && i === sbc;
+    const prefix = isActive ? '[' + GREEN + '♦' + RESET + barText + ' ' : DIM + '[ ';
+    const suffix = (isActive ? barText : DIM) + ' ]' + RESET;
+    out += prefix + SETTINGS_BAR_ITEMS[i] + suffix;
+    if (i < SETTINGS_BAR_ITEMS.length - 1) out += '  ';
+  }
+  if (sbf) {
+    out += '  ' + DIM + '←→ nav  Enter open  Esc release' + RESET;
+  } else {
+    out += '  ' + DIM + '[F2] focus' + RESET;
+  }
+  out += ESC + '0K';
 
   process.stdout.write(out);
 }
@@ -1076,7 +1212,7 @@ function renderSettings() {
   }
 
   const boxW = Math.min(55, w - 4);
-  const boxH = 9;
+  const boxH = 10;
   const bx = Math.floor((w - boxW) / 2);
   const by = Math.floor(rows / 2) - 3;
 
@@ -1086,7 +1222,9 @@ function renderSettings() {
 
   out += drawText(by + 1, bx + 2, selMark('max_songs') + hi('max_songs') + `Max songs between band:${RESET} ${CYAN}${maxSongsBetweenBand}${RESET}  ${DIM}(0=every round)${RESET}`);
   out += drawText(by + 2, bx + 2, selMark('bumper_vol') + hi('bumper_vol') + `Bumper volume:${RESET}            ${CYAN}${bumperVolume}%${RESET}`);
-  out += drawText(by + 3, bx + 2, selMark('karaoke') + hi('karaoke') + `Karaoke mode:${RESET}              ${karaokeEnabled ? GREEN + 'ON' + RESET : RED + 'OFF' + RESET}  ${DIM}(Enter=toggle)${RESET}`);
+  const chordColorLabel = telepromptConfig.chord_color_mode === 'flavor' ? (BLUE + 'Chord Flavor' + RESET) : (YELLOW + 'Circle of 5ths' + RESET);
+  out += drawText(by + 3, bx + 2, selMark('chord_color') + hi('chord_color') + `Chord colors:${RESET}              ${chordColorLabel}  ${DIM}(Enter=toggle)${RESET}`);
+  out += drawText(by + 4, bx + 2, selMark('karaoke') + hi('karaoke') + `Karaoke mode:${RESET}              ${karaokeEnabled ? GREEN + 'ON' + RESET : RED + 'OFF' + RESET}  ${DIM}(Enter=toggle)${RESET}`);
 
   if (settingsField === 'max_songs') {
     out += drawText(by + 5, bx + 2, `${BOLD}New value:${RESET} ` + CYAN + settingsValue + '█' + RESET);
@@ -1101,6 +1239,151 @@ function renderSettings() {
   out += drawText(by + 7, bx + 2, `Round ${singerQueue.round || 1}  ${DIM}ETA ${queueState.eta_minutes || 0}m${RESET}`);
 
   process.stdout.write(out);
+}
+
+function renderSettingsMenu() {
+  const cols = process.stdout.columns || 80;
+  const rows = process.stdout.rows || 30;
+  const w = cols;
+
+  let out = HIDE + CLS;
+
+  // Title
+  out += ESC + '1;1H' + BG_ORANGE + ' '.repeat(w) + RESET;
+  out += ESC + '1;2H' + WHITE + BOLD + ' SETTINGS MENU  ' + RESET;
+
+  // Page tabs
+  const tabW = Math.floor(w / SETTINGS_PAGES.length);
+  for (let i = 0; i < SETTINGS_PAGES.length; i++) {
+    const isActive = i === settingsMenuPage;
+    const tabStart = i * tabW + 1;
+    const label = SETTINGS_PAGES[i];
+    const pad = Math.floor((tabW - label.length) / 2);
+    const tabStyle = isActive ? (BG_ORANGE + WHITE + BOLD) : (DIM);
+    out += ESC + '2;' + tabStart + 'H' + tabStyle + ' '.repeat(pad) + label + ' '.repeat(Math.max(0, tabW - pad - label.length)) + RESET;
+  }
+
+  // Content area
+  const contentTop = 3;
+  const contentH = rows - contentTop - 1;
+
+  if (settingsMenuPage === 0) {
+    // Page 1: General
+    out += drawText(contentTop + 1, 4, BOLD + 'General Settings' + RESET);
+    out += drawText(contentTop + 2, 4, ORANGE + BOLD + '─ Tempo / BPM Sync' + RESET + ORANGE + ' ────────────────────────────' + RESET);
+
+    let line = contentTop + 3;
+    const fields = GENERAL_FIELDS;
+
+    for (let fi = 0; fi < fields.length; fi++) {
+      const field = fields[fi];
+      const isCursor = !settingsMenuField && settingsMenuCursor === fi;
+      const isEditing = settingsMenuField === field.key;
+      const curVal = isEditing ? settingsMenuValue : (field.key === 'beat1_behavior' ? tempoSyncConfig.beat1_behavior : tempoSyncConfig.beat_color);
+      const curOpt = (field.options || []).find(o => o.value === curVal);
+
+      const selMark = isCursor ? (CYAN + '▶' + RESET + ' ') : '  ';
+      const style = isCursor ? (INV + BOLD) : RESET;
+
+      out += drawText(line, 4, selMark + style + field.label + ':' + RESET);
+
+      if (isEditing) {
+        line++;
+        const opts = field.options || [];
+        const curIdx = opts.findIndex(o => o.value === curVal);
+        out += drawText(line, 6, DIM + '(use ↑↓ to select, Enter to confirm, Esc to cancel)' + RESET);
+        for (let oi = 0; oi < opts.length; oi++) {
+          line++;
+          const isSel = oi === (settingsMenuCursor >= 0 ? settingsMenuCursor : curIdx);
+          const optMark = isSel ? (GREEN + '▶' + RESET + ' ') : '  ';
+          out += drawText(line, 6, optMark + (isSel ? (WHITE + BOLD) : DIM) + opts[oi].label + RESET);
+        }
+        line++;
+      } else {
+        const valLabel = curOpt ? curOpt.label : curVal;
+        out += drawText(line, 36, CYAN + valLabel + RESET);
+        line++;
+      }
+    }
+
+    out += drawText(line, 4, '');
+    line++;
+    out += drawText(line, 4, DIM + 'More settings coming soon.' + RESET);
+
+  } else if (settingsMenuPage === 1) {
+    // Page 2: Teleprompter
+    out += drawText(contentTop + 1, 4, BOLD + 'Teleprompter Settings' + RESET);
+
+    // Section: Sync / Scroll
+    out += drawText(contentTop + 2, 4, ORANGE + BOLD + '─ Sync / Scroll' + RESET + ORANGE + ' ────────────────────────────────' + RESET);
+
+    const deviceNone = telepromptConfig.scroll_device === 'none';
+    let line = contentTop + 3;
+
+    for (let fi = 0; fi < TELEPROMPTER_FIELDS.length; fi++) {
+      const field = TELEPROMPTER_FIELDS[fi];
+      const isGreyed = field.dependsOn && ((field.invert ? telepromptConfig[field.dependsOn] === field.dependsValue : telepromptConfig[field.dependsOn] !== field.dependsValue));
+      const isCursor = !settingsMenuField && settingsMenuCursor === fi;
+      const isEditing = settingsMenuField === field.key;
+      const curVal = telepromptConfig[field.key];
+      const curOpt = (field.options || []).find(o => o.value === curVal);
+
+      const selMark = isCursor ? (CYAN + '▶' + RESET + ' ') : '  ';
+      const style = isGreyed ? DIM : (isCursor ? (INV + BOLD) : RESET);
+
+      out += drawText(line, 4, selMark + style + field.label + ':' + RESET);
+
+      if (isEditing) {
+        // Editing — show options list
+        line++;
+        const opts = field.options || [];
+        const curIdx = opts.findIndex(o => o.value === curVal);
+        out += drawText(line, 6, DIM + '(use ↑↓ to select, Enter to confirm, Esc to cancel)' + RESET);
+        for (let oi = 0; oi < opts.length; oi++) {
+          line++;
+          const isSel = oi === (settingsMenuCursor >= 0 ? settingsMenuCursor : curIdx);
+          const optMark = isSel ? (GREEN + '▶' + RESET + ' ') : '  ';
+          out += drawText(line, 6, optMark + (isSel ? (WHITE + BOLD) : DIM) + opts[oi].label + RESET);
+        }
+        line++;
+      } else {
+        // Not editing — show current value
+        const valColor = isGreyed ? DIM : CYAN;
+        const valLabel = curOpt ? curOpt.label : curVal;
+        out += drawText(line, 36, valColor + valLabel + RESET);
+        line++;
+      }
+    }
+
+    // Section: Display
+    out += drawText(line, 4, '');
+    line++;
+    out += drawText(line, 4, ORANGE + BOLD + '─ Display' + RESET + ORANGE + ' ───────────────────────────────────────' + RESET);
+    line++;
+    out += drawText(line, 4, DIM + 'No settings yet. Coming soon.' + RESET);
+
+  } else if (settingsMenuPage === 2) {
+    // Page 3: Karaoke
+    out += drawText(contentTop + 1, 4, BOLD + 'Karaoke Settings' + RESET);
+    out += drawText(contentTop + 3, 4, DIM + 'No settings yet. Karaoke settings will be moved here from the ? overlay.' + RESET);
+  }
+
+  // Footer
+  const foot = rows;
+  const editHint = settingsMenuField ? DIM + '↑↓ select option  Enter confirm  Esc cancel' + RESET : DIM + '←→ switch pages  ↑↓ select field  Enter edit  Esc close' + RESET;
+  out += ESC + foot + ';1H' + ESC + '0K';
+  out += ESC + foot + ';2H' + DIM + editHint + RESET;
+
+  process.stdout.write(out);
+}
+
+function getVisibleTeleFields() {
+  return TELEPROMPTER_FIELDS;
+}
+
+async function saveTelepromptConfig() {
+  const r = await apiPost('/api/config/teleprompter', telepromptConfig);
+  if (r && r.ok) log('Teleprompter settings saved');
 }
 
 function doSearch(query) {
@@ -1305,7 +1588,7 @@ function handleInput(chunk) {
       const dir = chunk[2];
       if (!settingsField) {
         if (dir === 0x41 || dir === 0x42) { // up/down — select setting
-          const order = ['max_songs', 'bumper_vol', 'karaoke'];
+          const order = ['max_songs', 'bumper_vol', 'chord_color', 'karaoke'];
           const idx = order.indexOf(settingsCursor);
           if (dir === 0x41) settingsCursor = order[Math.max(0, idx - 1)]; // up
           else settingsCursor = order[Math.min(order.length - 1, idx + 1)]; // down
@@ -1346,6 +1629,13 @@ function handleInput(chunk) {
           settingsField = settingsCursor;
           if (settingsCursor === 'max_songs') settingsValue = String(maxSongsBetweenBand);
           else if (settingsCursor === 'bumper_vol') settingsValue = String(bumperVolume);
+          else if (settingsCursor === 'chord_color') {
+            // Toggle chord color mode immediately
+            telepromptConfig.chord_color_mode = telepromptConfig.chord_color_mode === 'flavor' ? 'circle' : 'flavor';
+            saveTelepromptConfig();
+            renderSettings();
+            return;
+          }
           else if (settingsCursor === 'karaoke') {
             // Toggle karaoke immediately
             doAction('toggle-karaoke');
@@ -1387,7 +1677,146 @@ function handleInput(chunk) {
     return;
   }
 
+  // In settings menu mode (full-page overlay)
+  if (settingsMenuMode) {
+    if (chunk[0] === 0x1b && chunk.length >= 3 && chunk[1] === 0x5b) {
+      const dir = chunk[2];
+      if (settingsMenuField) {
+        // Editing a field — navigate options list
+        const field = TELEPROMPTER_FIELDS.find(f => f.key === settingsMenuField);
+        if (field) {
+          const opts = field.options || [];
+          const curVal = telepromptConfig[settingsMenuField];
+          const curIdx = opts.findIndex(o => o.value === curVal);
+          if (dir === 0x41) settingsMenuCursor = Math.max(0, (settingsMenuCursor >= 0 ? settingsMenuCursor : curIdx) - 1); // up
+          else if (dir === 0x42) settingsMenuCursor = Math.min(opts.length - 1, (settingsMenuCursor >= 0 ? settingsMenuCursor : curIdx) + 1); // down
+          renderSettingsMenu();
+        }
+        return;
+      }
+      // Not editing — navigate pages or fields
+      if (dir === 0x44) { settingsMenuPage = Math.max(0, settingsMenuPage - 1); settingsMenuCursor = 0; renderSettingsMenu(); return; } // left
+      if (dir === 0x43) { settingsMenuPage = Math.min(SETTINGS_PAGES.length - 1, settingsMenuPage + 1); settingsMenuCursor = 0; renderSettingsMenu(); return; } // right
+      if (dir === 0x41) { // up
+        if (settingsMenuPage === 0) {
+          settingsMenuCursor = Math.max(0, settingsMenuCursor - 1);
+          renderSettingsMenu();
+        } else if (settingsMenuPage === 1) {
+          const visibleFields = getVisibleTeleFields();
+          settingsMenuCursor = Math.max(0, settingsMenuCursor - 1);
+          renderSettingsMenu();
+        }
+        return;
+      }
+      if (dir === 0x42) { // down
+        if (settingsMenuPage === 0) {
+          const max = GENERAL_FIELDS.length - 1;
+          settingsMenuCursor = Math.min(max, settingsMenuCursor + 1);
+          renderSettingsMenu();
+        } else if (settingsMenuPage === 1) {
+          const visibleFields = getVisibleTeleFields();
+          settingsMenuCursor = Math.min(visibleFields.length - 1, settingsMenuCursor + 1);
+          renderSettingsMenu();
+        }
+        return;
+      }
+      return;
+    }
+    // Non-escape bytes
+    for (const ch of chunk) {
+      if (ch === 27) {
+        if (settingsMenuField) {
+          settingsMenuField = null;
+          settingsMenuValue = '';
+          settingsMenuCursor = 0;
+          renderSettingsMenu();
+        } else {
+          settingsMenuMode = false;
+          render();
+        }
+        return;
+      }
+      if (ch === 13) {
+        if (settingsMenuPage === 0) {
+          if (settingsMenuField) {
+            const field = GENERAL_FIELDS.find(f => f.key === settingsMenuField);
+            if (field) {
+              const opts = field.options || [];
+              if (settingsMenuCursor >= 0 && settingsMenuCursor < opts.length) {
+                if (settingsMenuField === 'beat1_behavior') tempoSyncConfig.beat1_behavior = opts[settingsMenuCursor].value;
+                else if (settingsMenuField === 'beat_color') tempoSyncConfig.beat_color = opts[settingsMenuCursor].value;
+                saveTempoSyncConfig();
+              }
+            }
+            settingsMenuField = null;
+            settingsMenuValue = '';
+            settingsMenuCursor = 0;
+            renderSettingsMenu();
+          } else if (GENERAL_FIELDS.length > 0) {
+            const field = GENERAL_FIELDS[settingsMenuCursor % GENERAL_FIELDS.length];
+            settingsMenuField = field.key;
+            const curVal = field.key === 'beat1_behavior' ? tempoSyncConfig.beat1_behavior : tempoSyncConfig.beat_color;
+            settingsMenuValue = curVal;
+            const opts = field.options || [];
+            settingsMenuCursor = opts.findIndex(o => o.value === curVal);
+            if (settingsMenuCursor < 0) settingsMenuCursor = 0;
+            renderSettingsMenu();
+          }
+        } else if (settingsMenuPage === 1) {
+          const visibleFields = getVisibleTeleFields();
+          if (settingsMenuField) {
+            // Confirm option selection
+            const field = TELEPROMPTER_FIELDS.find(f => f.key === settingsMenuField);
+            if (field) {
+              const opts = field.options || [];
+              if (settingsMenuCursor >= 0 && settingsMenuCursor < opts.length) {
+                telepromptConfig[settingsMenuField] = opts[settingsMenuCursor].value;
+                saveTelepromptConfig();
+              }
+            }
+            settingsMenuField = null;
+            settingsMenuValue = '';
+            settingsMenuCursor = 0;
+            renderSettingsMenu();
+          } else if (visibleFields.length > 0) {
+            // Enter edit mode for selected field
+            const field = visibleFields[settingsMenuCursor % visibleFields.length];
+            settingsMenuField = field.key;
+            const curVal = telepromptConfig[field.key];
+            const opts = field.options || [];
+            settingsMenuCursor = opts.findIndex(o => o.value === curVal);
+            if (settingsMenuCursor < 0) settingsMenuCursor = 0;
+            renderSettingsMenu();
+          }
+        }
+        return;
+      }
+    }
+    return;
+  }
+
   // Normal mode key handling
+  // F2 key detection (various terminal encodings)
+  const isF2 = (chunk[0] === 0x1b && chunk[1] === 0x4f && chunk[2] === 0x51) || // ESC O Q (macOS Terminal)
+               (chunk.length >= 4 && chunk[0] === 0x1b && chunk[1] === 0x5b && chunk[2] === 0x31 && chunk[3] === 0x32 && (chunk.length === 4 || chunk[4] === 0x7e)) || // ESC [ 1 2 ~ (xterm)
+               (chunk.length >= 5 && chunk[0] === 0x1b && chunk[1] === 0x5b && chunk[2] === 0x31 && chunk[3] === 0x3b && chunk[4] === 0x32 && chunk[5] === 0x51); // ESC [ 1 ; 2 Q (iTerm2)
+  if (isF2) {
+    settingsBarFocus = !settingsBarFocus;
+    if (!settingsBarFocus) settingsBarCursor = 0;
+    render();
+    return;
+  }
+
+  // Settings bar focus mode — arrow handling
+  if (settingsBarFocus && chunk[0] === 0x1b && chunk.length >= 3 && chunk[1] === 0x5b) {
+    const dir = chunk[2];
+    if (dir === 0x44) { settingsBarCursor = Math.max(0, settingsBarCursor - 1); render(); return; } // left
+    if (dir === 0x43) { settingsBarCursor = Math.min(SETTINGS_BAR_ITEMS.length - 1, settingsBarCursor + 1); render(); return; } // right
+    // ↑↓ — cycle options for items without sub-menu (not yet implemented, only "Settings" chip exists)
+    render();
+    return;
+  }
+
   // Handle arrow keys in normal mode
   if (chunk[0] === 0x1b && chunk.length >= 3 && chunk[1] === 0x5b) {
     const dir = chunk[2];
@@ -1409,6 +1838,26 @@ function handleInput(chunk) {
       }
       render();
       return;
+    }
+    return;
+  }
+
+  // Settings bar focus mode — key handling
+  if (settingsBarFocus) {
+    for (const ch of chunk) {
+      if (ch === 27) { settingsBarFocus = false; render(); return; }
+      if (ch === 13) {
+        if (settingsBarCursor === 0) {
+          settingsBarFocus = false;
+          settingsMenuMode = true;
+          settingsMenuPage = 0;
+          settingsMenuCursor = 0;
+          settingsMenuField = null;
+          settingsMenuValue = '';
+          renderSettingsMenu();
+        }
+        return;
+      }
     }
     return;
   }
@@ -1642,7 +2091,7 @@ async function init() {
   process.stdin.setRawMode(true);
   process.stdin.resume();
   process.stdin.on('data', handleInput);
-  process.stdout.on('resize', () => { if (!inputMode && !nameInputMode && !confirmMode && !showWifiInfo && !showPreflight && !setlistMode && !settingsMode && !exportMode) render(); else if (inputMode || nameInputMode) renderSearch(); else if (setlistMode) renderSetlistPicker(); else if (settingsMode || exportMode) renderSettings(); else if (showPreflight) renderPreflight(); });
+  process.stdout.on('resize', () => { if (!inputMode && !nameInputMode && !confirmMode && !showWifiInfo && !showPreflight && !setlistMode && !settingsMode && !exportMode && !settingsMenuMode) render(); else if (inputMode || nameInputMode) renderSearch(); else if (setlistMode) renderSetlistPicker(); else if (settingsMode || exportMode) renderSettings(); else if (settingsMenuMode) renderSettingsMenu(); else if (showPreflight) renderPreflight(); });
   process.on('exit', () => { process.stdout.write(SHOW); });
   process.on('SIGINT', () => { try { execSync(`bash "${SHOW_OPTIMIZE}" stop`, { timeout: 5000 }); } catch(e) {} process.stdout.write(SHOW); process.exit(0); });
   process.on('SIGTERM', () => { try { execSync(`bash "${SHOW_OPTIMIZE}" stop`, { timeout: 5000 }); } catch(e) {} process.stdout.write(SHOW); process.exit(0); });
@@ -1673,7 +2122,7 @@ async function init() {
   setInterval(async () => {
     await checkServer();
     await refreshState();
-    if (!inputMode && !nameInputMode && !confirmMode && !showWifiInfo && !showPreflight && !setlistMode && !settingsMode && !exportMode) render();
+    if (!inputMode && !nameInputMode && !confirmMode && !showWifiInfo && !showPreflight && !setlistMode && !settingsMode && !exportMode && !settingsMenuMode) render();
   }, 2000);
 }
 

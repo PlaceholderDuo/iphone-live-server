@@ -966,3 +966,200 @@ Also fixed: `bumperStop()` now calls `removeAllListeners("exit")` before killing
 |------|--------|
 | `scripts/tui.js` | +system stats functions (refreshSysStats, refreshNetLatency, refreshThermal), +stats row in render |
 | `web/server.js` (LSM bridge) | +`bumperExplicitStop = false` in bumperPlay, +`removeAllListeners` in bumperStop, +thermal pressure check |
+
+---
+
+## Session 12: Lyrics Scroll / Page Turner — Vision & Planning — 2026-08-06
+
+`#music #iphoneliveserver #teleprompter #settings #planning`
+
+### Goal
+
+Design a Settings Bar (bottom TUI row) + Settings Menu overlay system, starting with a Teleprompter page for lyrics scroll and page-turner device configuration.
+
+### Why This Matters
+
+The teleprompter currently scrolls purely by time-sync. There's no way to manually control scroll during a performance — no page-turner device support, no web-based buttons, no OSC control. When the band extends a solo or repeats a chorus, the teleprompter has no way to follow. This feature adds:
+
+1. **A Settings Bar** at the bottom of the TUI — always visible, one keypress away. Designed to hold multiple "chips" (Settings, future: Bumper Vol, Show Mode, etc.). Modeled after the macOS menu bar concept.
+
+2. **A multi-page Settings Menu overlay** with labeled category tabs (General, Teleprompter, Karaoke). Scales cleanly — adding a new category just adds a tab.
+
+3. **Teleprompter settings page** with:
+   - **Scroll / Page Turner Device** dropdown (None, Bluetooth, OSC, Web Control)
+   - **Left Button Mode** — rewind by seconds or restart current section
+   - **Right Button Mode** — skip forward by seconds or jump to next section
+   - **3rd Button Mode** — pause, rewind, section nav, hold combos for prev/next song
+   - Button modes greyed out when Device is set to None
+
+### Design Decisions
+
+- **Settings Bar is permanent TUI real estate** — not a modal. Always visible at the bottom.
+- **F2 / Ctrl+S to focus** the bar — avoids conflicting with 20+ existing single-key TUI bindings.
+- **`↑` `↓` cycles options** for simple dropdown items inline (no sub-menu needed) — fast, minimal keystrokes.
+- **`Enter` opens full settings page** for complex items like "Settings" — multi-page overlay with tabs.
+- **Button modes are dependent on Device** — greyed-out states prevent confusion (why configure buttons when no device is attached?).
+- **Config in `data/config.json` under `teleprompter` key** — follows existing project convention. No new config file.
+
+### Keyboard Flow
+
+```
+TUI (normal) → F2/Ctrl+S → Settings Bar focused
+  → ←/→ to move between chips
+  → Enter on "Settings" → Settings Menu overlay
+    → ←/→ switch pages (General | Teleprompter | Karaoke)
+    → ↑/↓ navigate fields
+    → Enter edit / cycle options
+    → Esc close menu
+  → ↑/↓ on simple chips to cycle values inline
+  → Esc release focus
+```
+
+### Data Model
+
+```json
+{
+  "teleprompter": {
+    "scroll_device": "none",
+    "left_button_mode": "rewind_5s",
+    "right_button_mode": "skip_5s",
+    "third_button_mode": "pause"
+  }
+}
+```
+
+- `scroll_device`: `none` | `bluetooth` | `osc` | `web_control`
+- `left_button_mode`: `rewind_2s` | `rewind_5s` | `rewind_10s` | `restart_section`
+- `right_button_mode`: `skip_2s` | `skip_5s` | `skip_10s` | `next_section`
+- `third_button_mode`: `pause` | `rewind_2s` | `rewind_5s` | `prev_section` | `next_section` | `hold_right_next_song` | `hold_left_prev_song`
+
+### "Hold + Left = Previous Song" Behavior
+
+Pressing the 3rd button (held) + Left button: if the current song has been playing for more than 10 seconds, the first press restarts from the beginning of the current song. Pressing again navigates to the previous song in the setlist. This prevents accidental song skips during short accidental presses while still allowing quick backtracking.
+
+### "Restart Section" Behavior
+
+Jumps to the beginning of the current verse/chorus/bridge. Uses the song's section markers from `meta.json`. If a song has two verses with the same name, it restarts the one currently playing. Essential for on-the-fly extensions when the band adds a chorus or solo.
+
+### Files to Create / Modify
+
+| File | Change |
+|------|--------|
+| `scripts/tui.js` | +Settings Bar render (bottom row), +settingsBarFocus state, +F2/Ctrl+S keybinding, +←/→/↑/↓/Enter/Esc handling in bar focus mode |
+| `scripts/tui.js` | +`renderSettingsMenu()` — full-screen overlay with page tabs, field navigation, edit mode |
+| `scripts/tui.js` | +Teleprompter page render — Sync/Scroll section with device dropdown + 3 button dropdowns, greyed-out logic, Display section placeholder |
+| `data/config.json` | +`teleprompter` settings block with defaults |
+| `server/api/auth.js` | +`GET /api/config/teleprompter` and `POST /api/config/teleprompter` endpoints |
+| `server/index.js` | +Route registration for teleprompter config |
+| `LYRICS_SCROLL_PAGE_TURNER_VISION_DOC.md` | **NEW** — full vision document with all specs, data model, keyboard flow, and implementation plan |
+
+### Next Steps
+
+- [x] Implement Phase 1: Settings Bar (bottom TUI row, F2 focus, chip navigation)
+- [x] Implement Phase 2: Settings Menu overlay (page tabs, field navigation)
+- [x] Implement Phase 3: Teleprompter page (device + button modes, API persistence)
+- [x] Implement Phase 4: General + Karaoke page placeholders
+- [ ] Later: Move existing karaoke settings (`?` overlay) into Karaoke page
+- [ ] Later: Add Display section settings (font size, chord toggle, theme, scroll smoothing)
+- [ ] Later: Implement actual scroll control via Bluetooth HID, OSC, and WebSocket
+- [ ] Later: Add actual scroll/jump logic to teleprompter page to test rewind/skip/section jumps
+
+### Implementation Notes (Session 12 — continued)
+
+All four phases of the settings system were implemented in a single session:
+
+**Settings Bar:**
+- Always-visible bottom row in TUI (reduced LOG height by 1 to accommodate)
+- Single "Settings" chip displayed with `[ ♦ Settings ]` when focused
+- F2 key (3 encodings: macOS Terminal ESC O Q, iTerm2 ESC [ 1 ; 2 Q, xterm ESC [ 1 2 ~) toggles focus
+- ← → navigate chips, Enter opens menu, Esc releases focus
+- Displays hint text: `[F2] focus` (unfocused) or `←→ nav  Enter open  Esc release` (focused)
+
+**Settings Menu Overlay:**
+- Full-screen overlay with orange title bar `SETTINGS MENU`
+- Tab navigation at row 2: General | Teleprompter | Karaoke (orange highlighted tab for active page)
+- ← → switches pages, preserving cursor position
+- Footer shows context-sensitive hints
+
+**Teleprompter Page:**
+- Sync / Scroll section header
+- 4 fields rendered in order: Scroll Device, Left Button Mode, Right Button Mode, 3rd Button Mode
+- Button mode fields are greyed out (DIM) when scroll_device is 'none'
+- Enter on a field enters editing mode — shows full option list with ▶ cursor
+- ↑↓ navigates options, Enter confirms (saves to config.json via API), Esc cancels
+- Dependencies enforced: `dependsOn` + `invert` logic controls greying
+
+**API Endpoints:**
+- `GET /api/config/teleprompter` — returns config with sensible defaults
+- `POST /api/config/teleprompter` — partial update (only sent fields are changed)
+- Both endpoints are public (whitelisted via `/config` prefix in server/index.js)
+- Config persisted to `data/config.json` under `teleprompter` key
+
+**Files Modified:**
+
+| File | Change |
+|------|--------|
+| `scripts/tui.js` | +130 lines — state variables, option constants, refreshTelepromptConfig, renderSettingsMenu, getVisibleTeleFields, saveTelepromptConfig, F2 detection, settings bar render, settings menu key handling, resize handler update, periodic render guard |
+| `server/api/auth.js` | +20 lines — GET/POST `/api/config/teleprompter` endpoints |
+| `data/config.json` | +6 lines — `teleprompter` config block with defaults |
+| `BUILD_LOG.md` | +30 lines — this implementation notes section |
+
+---
+
+## Session 13: Live Show Remote — Naming + Architecture Review + Chord Colors — 2026-08-06
+
+`#music #iphoneliveserver #remote #architecture #chords #planning`
+
+### Formalized Naming
+
+The iPhone 7 controller / webserver is now formally called **"Live Show Remote"** (port :3000, LSM bridge server). This distinguishes it from the iPhoneLiveServer (port :3300, TUI + singer queue) and the live-stage-hud (static files served by LSM).
+
+### Architecture Review — How REAPER ↔ Remote Communicates
+
+The system uses **three channels** between REAPER and the Live Show Remote:
+
+```
+Channel 1: File bridge (bridge_state.json)
+  Lua Runner (in REAPER) → writes every 200ms → bridge_state.json
+  Node.js server → polls every 500ms → broadcasts via WebSocket
+  Purpose: song/position state, track levels, loop states, regions
+
+Channel 2: OSC (bidirectional UDP)
+  Server → REAPER :8000: transport (play/stop/actions), mixer mute/solo,
+    song load/seek, amp presets, EDM scenes, FX presets, knob values
+  REAPER → Server :9000: time position, play/stop status, track volumes,
+    track mutes, FX params, tuner data, BPM feedback
+
+Channel 3: MIDI (virtual ports)
+  "Live Show Manager" output → Mobius loop control (CC 20-26)
+  "Live Show Manager Tuner" input ← ReaTune pitch detection → tuner UI
+```
+
+Primary insight: **OSC is for commands + feedback, the file bridge is the backbone for state syncing.**
+
+### Chord Color System
+
+Created `CHORD_COLORS_README.md` — full specification for color-coding chords by quality:
+
+| Type | Color | Detection |
+|------|-------|-----------|
+| Major | Yellow `#f1c40f` | No suffix, or "maj", "sus" |
+| Minor | Light Blue `#3498db` | "m" suffix (but not "maj") |
+| Power | Orange `#ff8800` | "5" suffix, no "m" |
+| Complex | Light Purple `#9b59b6` | "dim", "aug", "+", "m7b5", "°", "ø" |
+
+**Key design decisions:**
+- All classification done at render time by parsing chord text — no changes to meta.json or .chopro files
+- "Flavor of the chord" (7th, 9th, maj7, etc.) always displayed alongside root in smaller dimmed text
+- Chords rendered 2× lyrics font size on iPhone Lyrics page
+- Chord help popup with two checkboxes: "Show overlay" (transient) and "Display by default" (persistent via localStorage/config)
+- "Display by default" never changes current overlay state — only controls auto-enable on next boot
+
+### Next Steps (Live Show Remote Revamp)
+
+The iPhone controller needs to become fully-featured enough to run an entire show. Planned:
+- GTR/VOX dual-channel FX controls with preset recall + bypass (modeled after nova-script Performance View)
+- GTR/VOX volume controls on performance view
+- Teleprompter rewind/skip controls (3 buttons tied to TUI teleprompter settings)
+- Full setlist page (search, remove, rearrange, export, import)
+- Lyrics/Teleprompter mirror page with Plain View mode, font size slider, chord help overlay
